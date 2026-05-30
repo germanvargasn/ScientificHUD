@@ -1,417 +1,461 @@
-'use strict';
-
-/*
-  Scientific HUD for Meta Ray-Ban Display Web Apps
-
-  Expected sensor inputs:
-  - DeviceOrientationEvent for roll/pitch style orientation.
-  - DeviceMotionEvent for acceleration x/y/z.
-
-  Keyboard simulation for desktop testing:
-  - ArrowLeft / ArrowRight: roll
-  - ArrowUp / ArrowDown: pitch
-  - W / S: acceleration X
-  - A / D: acceleration Y
-  - Q / E: acceleration Z
-  - R: reset simulation
-  - Enter: request permission / start
+/* Scientific HUD v2
+   Meta Ray-Ban Display web-app prototype.
+   - Standard DeviceMotionEvent / DeviceOrientationEvent sensor hooks.
+   - Enter/pinch permission request.
+   - Keyboard simulation fallback.
 */
 
-const CONFIG = {
-  canvasSize: 600,
+(() => {
+  'use strict';
 
-  // Line positions as fractions of the 600x600 display.
-  horizonStartX: 0.10,
-  horizonEndX: 0.90,
-  rollReferenceStartX: 0.20,
-  rollReferenceEndX: 0.80,
-  pitchLineStartX: 0.40,
-  pitchLineEndX: 0.60,
+  const CONFIG = Object.freeze({
+    canvasSize: 600,
 
-  // Visual styling.
-  horizonLineWidth: 7,
-  rollReferenceLineWidth: 3,
-  pitchLineWidth: 2,
-  pitchLineAlpha: 0.58,
-  centerY: 300,
+    // Line geometry
+    horizonStartPct: 0.10,
+    horizonEndPct: 0.90,
+    rollReferenceStartPct: 0.20,
+    rollReferenceEndPct: 0.80,
+    pitchLineStartPct: 0.40,
+    pitchLineEndPct: 0.60,
 
-  // Roll color thresholds, in degrees.
-  rollYellowDeg: 20,
-  rollRedDeg: 40,
+    horizonLineWidth: 7,
+    rollReferenceLineWidth: 3,
+    pitchLineWidth: 2,
+    zeroPitchLineWidth: 4,
 
-  // Pitch line behavior.
-  pitchSpacingNeutralPx: 70,
-  pitchSpacingMinPx: 25,
-  pitchSpacingMaxPx: 105,
-  pitchShiftPxPerDeg: 3.5,
-  pitchCompressionMaxDeg: 45,
-  pitchReferenceLinesEachSide: 5,
+    // Color thresholds, degrees.
+    yellowAngleDeg: 20,
+    redAngleDeg: 40,
 
-  // Smoothing. 0 = no movement, 1 = immediate.
-  smoothing: 0.18,
+    // Pitch ladder.
+    pitchSpacingDeg: 10,
+    pitchMinDeg: -80,
+    pitchMaxDeg: 80,
+    pitchPixelsPerDegree: 10,
+    pitchLabelFont: '22px Arial, Helvetica, sans-serif',
+    pitchLabelOffsetPx: 10,
 
-  // Fallback simulation when real sensors are unavailable.
-  simulationStepDeg: 2,
-  simulationAccelStep: 0.15,
-  decimals: 2
-};
+    // Accelerometer.
+    accelDisplayDecimals: 2,
+    accelSmoothingWindowMs: 200,
+    invertAccelX: true,
 
-const state = {
-  hasStarted: false,
-  hasSensorEvents: false,
-  usingSimulation: false,
+    // Sensor smoothing for attitude. Small smoothing reduces visible jitter.
+    attitudeSmoothingAlpha: 0.18,
 
-  raw: {
-    roll: 0,
-    pitch: 0,
-    ax: 0,
-    ay: 0,
-    az: 0
-  },
+    // Keyboard simulation increments.
+    simAngleStepDeg: 2,
+    simAccelStep: 0.10,
+    simAccelDecay: 0.94,
+  });
 
-  smooth: {
-    roll: 0,
-    pitch: 0,
-    ax: 0,
-    ay: 0,
-    az: 0
-  }
-};
+  const canvas = document.getElementById('hudCanvas');
+  const ctx = canvas.getContext('2d');
+  const permissionOverlay = document.getElementById('permissionOverlay');
+  const enableButton = document.getElementById('enableSensorsButton');
+  const statusText = document.getElementById('statusText');
+  const modeLabel = document.getElementById('modeLabel');
+  const axEl = document.getElementById('ax');
+  const ayEl = document.getElementById('ay');
+  const azEl = document.getElementById('az');
 
-const canvas = document.getElementById('hudCanvas');
-const ctx = canvas.getContext('2d');
-const permissionOverlay = document.getElementById('permissionOverlay');
-const permissionButton = document.getElementById('permissionButton');
-const statusOverlay = document.getElementById('statusOverlay');
+  const state = {
+    sensorMode: false,
+    permissionRequested: false,
+    orientationSeen: false,
+    motionSeen: false,
 
-const axValue = document.getElementById('axValue');
-const ayValue = document.getElementById('ayValue');
-const azValue = document.getElementById('azValue');
+    rawPitchDeg: 0,
+    rawRollDeg: 0,
+    pitchDeg: 0,
+    rollDeg: 0,
+    pitchBaselineDeg: null,
+    rollBaselineDeg: null,
 
-function clamp(value, min, max) {
-  return Math.max(min, Math.min(max, value));
-}
+    accelX: 0,
+    accelY: 0,
+    accelZ: 0,
+    accelSamples: [],
 
-function lerp(a, b, t) {
-  return a + (b - a) * t;
-}
+    simPitchDeg: 0,
+    simRollDeg: 0,
+    simAccelX: 0,
+    simAccelY: 0,
+    simAccelZ: 0,
+  };
 
-function lerpColor(c1, c2, t) {
-  const u = clamp(t, 0, 1);
-  const r = Math.round(lerp(c1[0], c2[0], u));
-  const g = Math.round(lerp(c1[1], c2[1], u));
-  const b = Math.round(lerp(c1[2], c2[2], u));
-  return `rgb(${r}, ${g}, ${b})`;
-}
-
-function rollColorFromDegrees(rollDeg) {
-  const a = Math.abs(rollDeg);
-  const green = [0, 255, 0];
-  const yellow = [255, 255, 0];
-  const red = [255, 0, 0];
-
-  if (a <= CONFIG.rollYellowDeg) {
-    return lerpColor(green, yellow, a / CONFIG.rollYellowDeg);
+  function clamp(value, min, max) {
+    return Math.min(max, Math.max(min, value));
   }
 
-  if (a <= CONFIG.rollRedDeg) {
-    return lerpColor(
-      yellow,
-      red,
-      (a - CONFIG.rollYellowDeg) / (CONFIG.rollRedDeg - CONFIG.rollYellowDeg)
+  function lerp(a, b, t) {
+    return a + (b - a) * clamp(t, 0, 1);
+  }
+
+  function rgb(r, g, b, alpha = 1) {
+    return `rgba(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)}, ${alpha})`;
+  }
+
+  function angleColor(angleDeg, alpha = 1) {
+    const a = Math.abs(angleDeg);
+
+    if (a <= CONFIG.yellowAngleDeg) {
+      const t = a / CONFIG.yellowAngleDeg;
+      // Green -> Yellow.
+      return rgb(lerp(0, 255, t), 255, 0, alpha);
+    }
+
+    const t = (a - CONFIG.yellowAngleDeg) / (CONFIG.redAngleDeg - CONFIG.yellowAngleDeg);
+    // Yellow -> Red.
+    return rgb(255, lerp(255, 0, t), 0, alpha);
+  }
+
+  function normalizeAngle180(deg) {
+    let out = deg;
+    while (out > 180) out -= 360;
+    while (out < -180) out += 360;
+    return out;
+  }
+
+  function smoothAngle(previous, next, alpha) {
+    const delta = normalizeAngle180(next - previous);
+    return normalizeAngle180(previous + delta * alpha);
+  }
+
+  function resetCalibration() {
+    state.pitchBaselineDeg = state.rawPitchDeg;
+    state.rollBaselineDeg = state.rawRollDeg;
+    state.pitchDeg = 0;
+    state.rollDeg = 0;
+    setStatus('Calibrated neutral attitude');
+  }
+
+  function addAccelSample(x, y, z) {
+    const now = performance.now();
+    state.accelSamples.push({ t: now, x, y, z });
+
+    const cutoff = now - CONFIG.accelSmoothingWindowMs;
+    while (state.accelSamples.length && state.accelSamples[0].t < cutoff) {
+      state.accelSamples.shift();
+    }
+
+    let sx = 0, sy = 0, sz = 0;
+    for (const sample of state.accelSamples) {
+      sx += sample.x;
+      sy += sample.y;
+      sz += sample.z;
+    }
+    const n = Math.max(1, state.accelSamples.length);
+    state.accelX = sx / n;
+    state.accelY = sy / n;
+    state.accelZ = sz / n;
+  }
+
+  function formatNumber(value) {
+    if (Math.abs(value) < 0.005) return '0.00';
+    return value.toFixed(CONFIG.accelDisplayDecimals);
+  }
+
+  function updateAccelerationReadout() {
+    axEl.textContent = `A-X: ${formatNumber(state.accelX)}`;
+    ayEl.textContent = `A-Y: ${formatNumber(state.accelY)}`;
+    azEl.textContent = `A-Z: ${formatNumber(state.accelZ)}`;
+  }
+
+  function setStatus(message, mode = null) {
+    statusText.textContent = message;
+    if (mode) modeLabel.textContent = mode;
+  }
+
+  function clearCanvas() {
+    ctx.clearRect(0, 0, CONFIG.canvasSize, CONFIG.canvasSize);
+  }
+
+  function drawCenteredRotatedLine(x1, x2, y, angleDeg, strokeStyle, lineWidth) {
+    const cx = CONFIG.canvasSize / 2;
+    const cy = y;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate((angleDeg * Math.PI) / 180);
+    ctx.beginPath();
+    ctx.moveTo(x1 - cx, 0);
+    ctx.lineTo(x2 - cx, 0);
+    ctx.strokeStyle = strokeStyle;
+    ctx.lineWidth = lineWidth;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawScreenAlignedLine(x1, x2, y, strokeStyle, lineWidth, alpha = 1) {
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.beginPath();
+    ctx.moveTo(x1, y);
+    ctx.lineTo(x2, y);
+    ctx.strokeStyle = strokeStyle;
+    ctx.lineWidth = lineWidth;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawPitchLadder() {
+    const centerY = CONFIG.canvasSize / 2;
+    const x1 = CONFIG.canvasSize * CONFIG.pitchLineStartPct;
+    const x2 = CONFIG.canvasSize * CONFIG.pitchLineEndPct;
+    const labelLeftX = x1 - CONFIG.pitchLabelOffsetPx;
+    const labelRightX = x2 + CONFIG.pitchLabelOffsetPx;
+
+    ctx.save();
+    ctx.font = CONFIG.pitchLabelFont;
+    ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round';
+
+    for (let angle = CONFIG.pitchMinDeg; angle <= CONFIG.pitchMaxDeg; angle += CONFIG.pitchSpacingDeg) {
+      const y = centerY - (angle - state.pitchDeg) * CONFIG.pitchPixelsPerDegree;
+      if (y < -40 || y > CONFIG.canvasSize + 40) continue;
+
+      const color = angleColor(angle, 0.92);
+      const isZero = angle === 0;
+      const lineWidth = isZero ? CONFIG.zeroPitchLineWidth : CONFIG.pitchLineWidth;
+      const halfGap = isZero ? 18 : 12;
+      const midX = CONFIG.canvasSize / 2;
+
+      // Split the line to leave a tiny center gap, like aircraft-style pitch ladders.
+      drawScreenAlignedLine(x1, midX - halfGap, y, color, lineWidth, 0.88);
+      drawScreenAlignedLine(midX + halfGap, x2, y, color, lineWidth, 0.88);
+
+      const label = angle > 0 ? `+${angle}` : `${angle}`;
+      ctx.fillStyle = color;
+      ctx.textAlign = 'right';
+      ctx.fillText(label, labelLeftX, y);
+      ctx.textAlign = 'left';
+      ctx.fillText(label, labelRightX, y);
+    }
+
+    ctx.restore();
+  }
+
+  function drawHorizonAndRollReference() {
+    const centerY = CONFIG.canvasSize / 2;
+    const horizonX1 = CONFIG.canvasSize * CONFIG.horizonStartPct;
+    const horizonX2 = CONFIG.canvasSize * CONFIG.horizonEndPct;
+    const rollX1 = CONFIG.canvasSize * CONFIG.rollReferenceStartPct;
+    const rollX2 = CONFIG.canvasSize * CONFIG.rollReferenceEndPct;
+
+    // World horizon: thick line, rotates opposite the user's head roll so it feels fixed in space.
+    drawCenteredRotatedLine(
+      horizonX1,
+      horizonX2,
+      centerY,
+      -state.rollDeg,
+      'rgba(255, 255, 255, 0.94)',
+      CONFIG.horizonLineWidth
+    );
+
+    // Screen-fixed roll reference: thin line, never rotates, color indicates roll magnitude.
+    drawScreenAlignedLine(
+      rollX1,
+      rollX2,
+      centerY,
+      angleColor(state.rollDeg, 0.96),
+      CONFIG.rollReferenceLineWidth,
+      1
     );
   }
 
-  return 'rgb(255, 0, 0)';
-}
-
-function degreesToRadians(deg) {
-  return (deg * Math.PI) / 180;
-}
-
-function smoothValue(current, target) {
-  return lerp(current, target, CONFIG.smoothing);
-}
-
-function updateSmoothedState() {
-  state.smooth.roll = smoothValue(state.smooth.roll, state.raw.roll);
-  state.smooth.pitch = smoothValue(state.smooth.pitch, state.raw.pitch);
-  state.smooth.ax = smoothValue(state.smooth.ax, state.raw.ax);
-  state.smooth.ay = smoothValue(state.smooth.ay, state.raw.ay);
-  state.smooth.az = smoothValue(state.smooth.az, state.raw.az);
-}
-
-function clearCanvas() {
-  ctx.clearRect(0, 0, CONFIG.canvasSize, CONFIG.canvasSize);
-}
-
-function drawLine(x1, y1, x2, y2, color, width, alpha = 1) {
-  ctx.save();
-  ctx.globalAlpha = alpha;
-  ctx.strokeStyle = color;
-  ctx.lineWidth = width;
-  ctx.lineCap = 'round';
-  ctx.beginPath();
-  ctx.moveTo(x1, y1);
-  ctx.lineTo(x2, y2);
-  ctx.stroke();
-  ctx.restore();
-}
-
-function drawRotatingHorizon() {
-  const y = CONFIG.centerY;
-  const x1 = CONFIG.canvasSize * CONFIG.horizonStartX;
-  const x2 = CONFIG.canvasSize * CONFIG.horizonEndX;
-  const cx = CONFIG.canvasSize / 2;
-  const cy = CONFIG.centerY;
-
-  ctx.save();
-  ctx.translate(cx, cy);
-  // Negative sign makes the horizon visually counter-rotate to remain world-level as head rolls.
-  ctx.rotate(degreesToRadians(-state.smooth.roll));
-  drawLine(x1 - cx, y - cy, x2 - cx, y - cy, 'rgb(0, 255, 0)', CONFIG.horizonLineWidth, 0.95);
-  ctx.restore();
-}
-
-function drawScreenAlignedRollReference() {
-  const y = CONFIG.centerY;
-  const x1 = CONFIG.canvasSize * CONFIG.rollReferenceStartX;
-  const x2 = CONFIG.canvasSize * CONFIG.rollReferenceEndX;
-  const color = rollColorFromDegrees(state.smooth.roll);
-  drawLine(x1, y, x2, y, color, CONFIG.rollReferenceLineWidth, 1);
-}
-
-function getPitchSpacing(pitchDeg) {
-  const amount = clamp(Math.abs(pitchDeg) / CONFIG.pitchCompressionMaxDeg, 0, 1);
-  return lerp(CONFIG.pitchSpacingNeutralPx, CONFIG.pitchSpacingMinPx, amount);
-}
-
-function drawPitchReferenceLines() {
-  const x1 = CONFIG.canvasSize * CONFIG.pitchLineStartX;
-  const x2 = CONFIG.canvasSize * CONFIG.pitchLineEndX;
-  const centerY = CONFIG.centerY;
-
-  const spacing = getPitchSpacing(state.smooth.pitch);
-  const offset = -state.smooth.pitch * CONFIG.pitchShiftPxPerDeg;
-
-  for (let i = -CONFIG.pitchReferenceLinesEachSide; i <= CONFIG.pitchReferenceLinesEachSide; i += 1) {
-    if (i === 0) continue;
-
-    const y = centerY + offset + i * spacing;
-    if (y < -20 || y > CONFIG.canvasSize + 20) continue;
-
-    const alpha = CONFIG.pitchLineAlpha * (1 - Math.min(Math.abs(i) * 0.08, 0.45));
-    drawLine(x1, y, x2, y, 'rgb(255, 255, 255)', CONFIG.pitchLineWidth, alpha);
+  function drawDebugText() {
+    ctx.save();
+    ctx.font = '18px Arial, Helvetica, sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.45)';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(`P ${state.pitchDeg.toFixed(1)}°  R ${state.rollDeg.toFixed(1)}°`, 4, CONFIG.canvasSize - 4);
+    ctx.restore();
   }
-}
 
-function updateReadouts() {
-  axValue.textContent = state.smooth.ax.toFixed(CONFIG.decimals);
-  ayValue.textContent = state.smooth.ay.toFixed(CONFIG.decimals);
-  azValue.textContent = state.smooth.az.toFixed(CONFIG.decimals);
-}
-
-function render() {
-  updateSmoothedState();
-  clearCanvas();
-
-  // Layering: pitch references first, horizon next, screen-aligned roll reference last.
-  drawPitchReferenceLines();
-  drawRotatingHorizon();
-  drawScreenAlignedRollReference();
-  updateReadouts();
-
-  requestAnimationFrame(render);
-}
-
-function showStatus(message) {
-  statusOverlay.textContent = message;
-  statusOverlay.classList.remove('hidden');
-}
-
-function hideStatus() {
-  statusOverlay.textContent = '';
-  statusOverlay.classList.add('hidden');
-}
-
-function startHud({ simulation = false } = {}) {
-  state.hasStarted = true;
-  state.usingSimulation = simulation;
-  permissionOverlay.classList.add('hidden');
-
-  if (simulation) {
-    showStatus('SIM MODE');
-  } else {
-    hideStatus();
+  function drawHUD() {
+    clearCanvas();
+    drawPitchLadder();
+    drawHorizonAndRollReference();
+    drawDebugText();
   }
-}
 
-async function requestSensorPermission() {
-  try {
-    // iOS-style permission flow for motion/orientation APIs.
-    if (
-      typeof DeviceMotionEvent !== 'undefined' &&
-      typeof DeviceMotionEvent.requestPermission === 'function'
-    ) {
-      const motionPermission = await DeviceMotionEvent.requestPermission();
-      if (motionPermission !== 'granted') {
-        showStatus('Motion permission denied. Using simulation.');
-        startHud({ simulation: true });
+  function updateAttitudeFromRaw() {
+    if (state.pitchBaselineDeg === null) state.pitchBaselineDeg = state.rawPitchDeg;
+    if (state.rollBaselineDeg === null) state.rollBaselineDeg = state.rawRollDeg;
+
+    const targetPitch = normalizeAngle180(state.rawPitchDeg - state.pitchBaselineDeg);
+    const targetRoll = normalizeAngle180(state.rawRollDeg - state.rollBaselineDeg);
+
+    state.pitchDeg = smoothAngle(state.pitchDeg, targetPitch, CONFIG.attitudeSmoothingAlpha);
+    state.rollDeg = smoothAngle(state.rollDeg, targetRoll, CONFIG.attitudeSmoothingAlpha);
+  }
+
+  function handleOrientation(event) {
+    state.orientationSeen = true;
+
+    // Standard web orientation:
+    // beta: front/back tilt, gamma: left/right tilt.
+    // We calibrate initial pose to zero to avoid sign and mounting surprises.
+    const beta = Number.isFinite(event.beta) ? event.beta : 0;
+    const gamma = Number.isFinite(event.gamma) ? event.gamma : 0;
+
+    state.rawPitchDeg = beta;
+    state.rawRollDeg = gamma;
+  }
+
+  function handleMotion(event) {
+    state.motionSeen = true;
+    const a = event.accelerationIncludingGravity || event.acceleration || { x: 0, y: 0, z: 0 };
+
+    let x = Number.isFinite(a.x) ? a.x : 0;
+    let y = Number.isFinite(a.y) ? a.y : 0;
+    let z = Number.isFinite(a.z) ? a.z : 0;
+
+    if (CONFIG.invertAccelX) x *= -1;
+    addAccelSample(x, y, z);
+  }
+
+  async function requestMotionAccess() {
+    state.permissionRequested = true;
+    setStatus('Requesting sensors...', 'REQ');
+
+    try {
+      const permissionResults = [];
+
+      if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+        permissionResults.push(await DeviceMotionEvent.requestPermission());
+      }
+
+      if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+        permissionResults.push(await DeviceOrientationEvent.requestPermission());
+      }
+
+      if (permissionResults.includes('denied')) {
+        setStatus('Permission denied; simulation active', 'SIM');
+        state.sensorMode = false;
+        permissionOverlay.classList.add('hidden');
         return;
       }
+
+      window.addEventListener('deviceorientation', handleOrientation, true);
+      window.addEventListener('devicemotion', handleMotion, true);
+
+      state.sensorMode = true;
+      permissionOverlay.classList.add('hidden');
+      setStatus('Sensors active; press C to recalibrate', 'LIVE');
+
+      // Give the first real reading a moment, then calibrate neutral if present.
+      setTimeout(() => {
+        if (state.orientationSeen) resetCalibration();
+        if (!state.orientationSeen && !state.motionSeen) {
+          setStatus('No sensor events yet; keyboard simulation active', 'SIM');
+        }
+      }, 500);
+    } catch (error) {
+      console.error(error);
+      permissionOverlay.classList.add('hidden');
+      state.sensorMode = false;
+      setStatus('Sensor request failed; simulation active', 'SIM');
+    }
+  }
+
+  function handleKeyboard(event) {
+    const key = event.key;
+
+    if (!permissionOverlay.classList.contains('hidden') && key === 'Enter') {
+      event.preventDefault();
+      requestMotionAccess();
+      return;
     }
 
-    if (
-      typeof DeviceOrientationEvent !== 'undefined' &&
-      typeof DeviceOrientationEvent.requestPermission === 'function'
-    ) {
-      const orientationPermission = await DeviceOrientationEvent.requestPermission();
-      if (orientationPermission !== 'granted') {
-        showStatus('Orientation permission denied. Using simulation.');
-        startHud({ simulation: true });
-        return;
-      }
+    let handled = true;
+    switch (key) {
+      case 'ArrowLeft':
+        state.simRollDeg -= CONFIG.simAngleStepDeg;
+        break;
+      case 'ArrowRight':
+        state.simRollDeg += CONFIG.simAngleStepDeg;
+        break;
+      case 'ArrowUp':
+        state.simPitchDeg += CONFIG.simAngleStepDeg;
+        break;
+      case 'ArrowDown':
+        state.simPitchDeg -= CONFIG.simAngleStepDeg;
+        break;
+      case 'w':
+      case 'W':
+        state.simAccelX += CONFIG.simAccelStep;
+        break;
+      case 's':
+      case 'S':
+        state.simAccelX -= CONFIG.simAccelStep;
+        break;
+      case 'a':
+      case 'A':
+        state.simAccelY -= CONFIG.simAccelStep;
+        break;
+      case 'd':
+      case 'D':
+        state.simAccelY += CONFIG.simAccelStep;
+        break;
+      case 'q':
+      case 'Q':
+        state.simAccelZ += CONFIG.simAccelStep;
+        break;
+      case 'e':
+      case 'E':
+        state.simAccelZ -= CONFIG.simAccelStep;
+        break;
+      case 'c':
+      case 'C':
+        resetCalibration();
+        break;
+      default:
+        handled = false;
     }
 
-    attachSensorListeners();
-    startHud({ simulation: false });
-
-    // If the device never sends events, fall back visibly after a short delay.
-    setTimeout(() => {
-      if (!state.hasSensorEvents) {
-        state.usingSimulation = true;
-        showStatus('No sensor events yet. SIM MODE active.');
+    if (handled) {
+      event.preventDefault();
+      if (!state.sensorMode || !state.orientationSeen) {
+        setStatus('Keyboard simulation active', 'SIM');
       }
-    }, 2500);
-  } catch (error) {
-    console.error('Sensor permission request failed:', error);
-    showStatus('Sensor request failed. Using simulation.');
-    startHud({ simulation: true });
-  }
-}
-
-function attachSensorListeners() {
-  window.addEventListener('deviceorientation', handleDeviceOrientation, true);
-  window.addEventListener('devicemotion', handleDeviceMotion, true);
-}
-
-function handleDeviceOrientation(event) {
-  state.hasSensorEvents = true;
-  state.usingSimulation = false;
-  hideStatus();
-
-  // Standard DeviceOrientationEvent values:
-  // beta: front/back tilt, roughly pitch, range -180..180
-  // gamma: left/right tilt, roughly roll, range -90..90
-  // alpha: compass/yaw, not used yet
-  if (typeof event.gamma === 'number') {
-    state.raw.roll = clamp(event.gamma, -90, 90);
+    }
   }
 
-  if (typeof event.beta === 'number') {
-    state.raw.pitch = clamp(event.beta, -90, 90);
-  }
-}
+  function updateSimulation() {
+    if (!state.sensorMode || !state.orientationSeen) {
+      state.pitchDeg = smoothAngle(state.pitchDeg, state.simPitchDeg, CONFIG.attitudeSmoothingAlpha);
+      state.rollDeg = smoothAngle(state.rollDeg, state.simRollDeg, CONFIG.attitudeSmoothingAlpha);
+    } else {
+      updateAttitudeFromRaw();
+    }
 
-function handleDeviceMotion(event) {
-  state.hasSensorEvents = true;
-  state.usingSimulation = false;
-  hideStatus();
-
-  const a = event.acceleration || event.accelerationIncludingGravity;
-  if (!a) return;
-
-  if (typeof a.x === 'number') state.raw.ax = a.x;
-  if (typeof a.y === 'number') state.raw.ay = a.y;
-  if (typeof a.z === 'number') state.raw.az = a.z;
-}
-
-function handleKeyboard(event) {
-  if (event.key === 'Enter' && !state.hasStarted) {
-    requestSensorPermission();
-    return;
+    if (!state.sensorMode || !state.motionSeen) {
+      addAccelSample(state.simAccelX, state.simAccelY, state.simAccelZ);
+      state.simAccelX *= CONFIG.simAccelDecay;
+      state.simAccelY *= CONFIG.simAccelDecay;
+      state.simAccelZ *= CONFIG.simAccelDecay;
+    }
   }
 
-  if (!state.hasStarted) return;
-
-  const key = event.key.toLowerCase();
-  const deg = CONFIG.simulationStepDeg;
-  const acc = CONFIG.simulationAccelStep;
-
-  switch (key) {
-    case 'arrowleft':
-      state.raw.roll -= deg;
-      state.usingSimulation = true;
-      showStatus('SIM MODE');
-      event.preventDefault();
-      break;
-    case 'arrowright':
-      state.raw.roll += deg;
-      state.usingSimulation = true;
-      showStatus('SIM MODE');
-      event.preventDefault();
-      break;
-    case 'arrowup':
-      state.raw.pitch += deg;
-      state.usingSimulation = true;
-      showStatus('SIM MODE');
-      event.preventDefault();
-      break;
-    case 'arrowdown':
-      state.raw.pitch -= deg;
-      state.usingSimulation = true;
-      showStatus('SIM MODE');
-      event.preventDefault();
-      break;
-    case 'w':
-      state.raw.ax += acc;
-      state.usingSimulation = true;
-      showStatus('SIM MODE');
-      break;
-    case 's':
-      state.raw.ax -= acc;
-      state.usingSimulation = true;
-      showStatus('SIM MODE');
-      break;
-    case 'a':
-      state.raw.ay -= acc;
-      state.usingSimulation = true;
-      showStatus('SIM MODE');
-      break;
-    case 'd':
-      state.raw.ay += acc;
-      state.usingSimulation = true;
-      showStatus('SIM MODE');
-      break;
-    case 'q':
-      state.raw.az -= acc;
-      state.usingSimulation = true;
-      showStatus('SIM MODE');
-      break;
-    case 'e':
-      state.raw.az += acc;
-      state.usingSimulation = true;
-      showStatus('SIM MODE');
-      break;
-    case 'r':
-      state.raw.roll = 0;
-      state.raw.pitch = 0;
-      state.raw.ax = 0;
-      state.raw.ay = 0;
-      state.raw.az = 0;
-      state.usingSimulation = true;
-      showStatus('SIM MODE');
-      break;
-    default:
-      break;
+  function animationLoop() {
+    updateSimulation();
+    updateAccelerationReadout();
+    drawHUD();
+    requestAnimationFrame(animationLoop);
   }
 
-  state.raw.roll = clamp(state.raw.roll, -90, 90);
-  state.raw.pitch = clamp(state.raw.pitch, -90, 90);
-}
+  function init() {
+    enableButton.addEventListener('click', requestMotionAccess);
+    window.addEventListener('keydown', handleKeyboard);
+    enableButton.focus();
+    setStatus('Press Enter to enable sensors', 'READY');
+    animationLoop();
+  }
 
-permissionButton.addEventListener('click', requestSensorPermission);
-window.addEventListener('keydown', handleKeyboard);
-
-// Start render loop immediately so the permission screen overlays a live black/transparent canvas.
-requestAnimationFrame(render);
+  init();
+})();

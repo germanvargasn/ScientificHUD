@@ -1,33 +1,36 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=600, height=600, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#000000" />
   <title>Scientific HUD</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <main id="app" aria-label="Scientific HUD">
-    <canvas id="hudCanvas" width="600" height="600" aria-label="Pitch and roll heads-up display"></canvas>
+    <canvas id="hudCanvas" width="600" height="600" aria-label="Scientific heads-up display"></canvas>
 
-    <section id="accelReadout" aria-label="Acceleration readouts">
-      <div class="axis axis-x">A-X: <span id="axValue">0.00</span></div>
-      <div class="axis axis-y">A-Y: <span id="ayValue">0.00</span></div>
-      <div class="axis axis-z">A-Z: <span id="azValue">0.00</span></div>
+    <section id="accelReadout" aria-label="Acceleration readout">
+      <div id="ax" class="axis axis-x">A-X: 0.00</div>
+      <div id="ay" class="axis axis-y">A-Y: 0.00</div>
+      <div id="az" class="axis axis-z">A-Z: 0.00</div>
     </section>
 
-    <section id="permissionOverlay" class="overlay" aria-label="Sensor permission request">
-      <div class="permission-card">
+    <section id="permissionOverlay" class="overlay" aria-label="Motion sensor permission dialog">
+      <div class="dialog">
         <h1>Scientific HUD</h1>
-        <p>Allow motion sensors to show pitch, roll, and acceleration.</p>
-        <button id="permissionButton" autofocus>Allow Sensors</button>
-        <p class="hint">Pinch / Enter to allow</p>
+        <p>Allow motion sensors</p>
+        <button id="enableSensorsButton" type="button">ENABLE</button>
+        <p class="hint">Pinch or press Enter</p>
       </div>
     </section>
 
-    <section id="statusOverlay" class="status hidden" aria-live="polite"></section>
+    <section id="statusOverlay" aria-live="polite">
+      <span id="modeLabel">SIM</span>
+      <span id="statusText">Keyboard simulation ready</span>
+    </section>
   </main>
-
   <script src="app.js"></script>
 </body>
 </html>
