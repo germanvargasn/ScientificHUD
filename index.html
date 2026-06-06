@@ -11,11 +11,17 @@
   <main id="app" aria-label="Scientific HUD">
     <canvas id="hudCanvas" width="600" height="600" aria-label="Scientific heads-up display"></canvas>
 
-    <section id="accelReadout" aria-label="Acceleration readout">
-      <div id="ax" class="axis axis-x">A-X: 0.00</div>
-      <div id="ay" class="axis axis-y">A-Y: 0.00</div>
-      <div id="az" class="axis axis-z">A-Z: 0.00</div>
+    <section id="compassReadout" aria-label="Compass heading readout">
+      <div id="compassStrip"></div>
     </section>
+
+    <section id="accelReadout" aria-label="Acceleration readout">
+      <div id="ax" class="axis axis-x">A-X: 0.0</div>
+      <div id="ay" class="axis axis-y">A-Y: 0.0</div>
+      <div id="az" class="axis axis-z">A-Z: 0.0</div>
+    </section>
+
+    <button id="calibrateButton" class="calibrate hidden" type="button">SET ZERO</button>
 
     <section id="permissionOverlay" class="overlay" aria-label="Motion sensor permission dialog">
       <div class="dialog">
@@ -24,11 +30,6 @@
         <button id="enableSensorsButton" type="button">ENABLE</button>
         <p class="hint">Pinch or press Enter</p>
       </div>
-    </section>
-
-    <section id="statusOverlay" aria-live="polite">
-      <span id="modeLabel">SIM</span>
-      <span id="statusText">Keyboard simulation ready</span>
     </section>
   </main>
   <script src="app.js"></script>

@@ -1,8 +1,8 @@
 :root {
   --display-size: 600px;
   --transparent-black: #000000;
-  --hud-white: rgba(255, 255, 255, 0.92);
-  --hud-dim: rgba(255, 255, 255, 0.50);
+  --hud-white: rgba(255, 255, 255, 0.94);
+  --hud-dim: rgba(255, 255, 255, 0.55);
   --axis-font-size: 36px;
   --system-font: Arial, Helvetica, sans-serif;
 }
@@ -36,16 +36,42 @@ html, body {
   background: var(--transparent-black);
 }
 
-#accelReadout {
+#compassReadout {
   position: absolute;
   top: 0;
   left: 0;
-  z-index: 2;
+  width: var(--display-size);
+  height: 52px;
+  z-index: 3;
+  overflow: hidden;
+  pointer-events: none;
+  background: linear-gradient(to bottom, rgba(0,0,0,0.45), rgba(0,0,0,0));
+}
+
+#compassStrip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 52px;
+  width: var(--display-size);
+  color: rgba(255,255,255,0.92);
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 52px;
+  text-align: center;
+  text-shadow: 0 0 4px rgba(0,0,0,0.85);
+}
+
+#accelReadout {
+  position: absolute;
+  top: 54px;
+  left: 0;
+  z-index: 3;
   font-size: var(--axis-font-size);
   line-height: 1.05;
   font-weight: 700;
   letter-spacing: 0.5px;
-  text-shadow: 0 0 4px rgba(0,0,0,0.8);
+  text-shadow: 0 0 4px rgba(0,0,0,0.85);
   pointer-events: none;
 }
 
@@ -53,17 +79,38 @@ html, body {
 .axis-y { color: rgb(0, 255, 0); }
 .axis-z { color: rgb(70, 140, 255); }
 
+.calibrate {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+  z-index: 4;
+  width: 230px;
+  height: 54px;
+  border: 2px solid rgba(255,255,255,0.80);
+  background: rgba(0,0,0,0.50);
+  color: rgba(255,255,255,0.95);
+  font-family: var(--system-font);
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.calibrate:focus {
+  outline: 4px solid rgb(0,255,0);
+  outline-offset: 2px;
+}
+
+.hidden { display: none !important; }
+
 .overlay {
   position: absolute;
   inset: 0;
-  z-index: 5;
+  z-index: 10;
   display: flex;
   align-items: center;
   justify-content: center;
   background: rgba(0, 0, 0, 0.86);
 }
-
-.overlay.hidden { display: none; }
 
 .dialog {
   width: 520px;
@@ -104,25 +151,4 @@ html, body {
   margin: 22px 0 0;
   font-size: 22px;
   color: var(--hud-dim);
-}
-
-#statusOverlay {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  z-index: 2;
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  font-size: 18px;
-  line-height: 1;
-  color: rgba(255,255,255,0.65);
-  background: rgba(0,0,0,0.45);
-  padding: 4px 6px;
-  pointer-events: none;
-}
-
-#modeLabel {
-  color: rgb(255,255,0);
-  font-weight: 700;
 }
