@@ -81,22 +81,24 @@ html, body {
 
 .calibrate {
   position: absolute;
-  left: 50%;
-  bottom: 0;
-  transform: translateX(-50%);
+  right: 4px;
+  bottom: 2px;
   z-index: 4;
-  width: 230px;
-  height: 54px;
-  border: 2px solid rgba(255,255,255,0.80);
-  background: rgba(0,0,0,0.50);
-  color: rgba(255,255,255,0.95);
+  width: auto;
+  max-width: 330px;
+  height: auto;
+  border: 0;
+  background: transparent;
+  color: rgba(255,255,255,0.62);
   font-family: var(--system-font);
-  font-size: 24px;
-  font-weight: 700;
+  font-size: 20px;
+  font-weight: 600;
+  text-align: right;
+  text-shadow: 0 0 4px rgba(0,0,0,0.85);
 }
 
 .calibrate:focus {
-  outline: 4px solid rgb(0,255,0);
+  outline: 2px solid rgba(0,255,0,0.45);
   outline-offset: 2px;
 }
 

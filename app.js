@@ -1,4 +1,4 @@
-/* Scientific HUD v3
+/* Scientific HUD v4
    Meta Ray-Ban Display web-app prototype.
 
    Sensor mapping follows the standard DeviceOrientationEvent fields:
@@ -7,9 +7,10 @@
    - event.gamma: roll, degrees, usually -90..90
 
    DeviceMotionEvent acceleration:
-   - Prefer event.acceleration when available because gravity is already removed.
-   - Fall back to event.accelerationIncludingGravity and subtract an estimated gravity value
-     from Y because the glasses showed ~9.7 m/s^2 on A-Y when still.
+   - Uses event.acceleration for displayed acceleration when available.
+   - Falls back to event.accelerationIncludingGravity and subtracts gravity from Y.
+   - Uses event.accelerationIncludingGravity as the preferred source for visual roll,
+     because beta/gamma Euler angles can become unstable near some attitudes.
 */
 
 (() => {
@@ -54,8 +55,16 @@
     invertAccelX: true,
     gravityMetersPerSecond2: 9.81,
 
-    // Keep attitude smoothing very low but not zero to avoid shimmer.
+    // Attitude smoothing. Pitch/heading remain responsive; gravity roll is smoothed slightly
+    // to reduce shimmer without lagging too much.
     attitudeSmoothingAlpha: 0.35,
+    gravityRollSmoothingAlpha: 0.22,
+    rollDeadbandDeg: 1.2,
+    rollDisplayGain: 1.0,
+
+    // If the horizon seems mirrored on the glasses, this is the first sign to flip.
+    // v4 defaults to +1 because v3's gamma-based roll was visually overturning.
+    visualRollSign: 1,
 
     // Keyboard simulation increments.
     simAngleStepDeg: 2,
@@ -82,6 +91,8 @@
     rawHeadingDeg: 0,
     rawPitchDeg: 0,
     rawRollDeg: 0,
+    rawGravityRollDeg: 0,
+    gravityRollSeen: false,
 
     headingDeg: 0,
     pitchDeg: 0,
@@ -90,6 +101,7 @@
     headingBaselineDeg: 0,
     pitchBaselineDeg: null,
     rollBaselineDeg: null,
+    gravityRollBaselineDeg: null,
 
     accelX: 0,
     accelY: 0,
@@ -145,6 +157,11 @@
     return previous + (next - previous) * alpha;
   }
 
+  function applyDeadband(value, deadband) {
+    if (Math.abs(value) <= deadband) return 0;
+    return value > 0 ? value - deadband : value + deadband;
+  }
+
   function smoothHeading(previous, next, alpha) {
     const delta = normalize180(next - previous);
     return normalize360(previous + delta * alpha);
@@ -153,6 +170,7 @@
   function setNeutral() {
     state.pitchBaselineDeg = state.rawPitchDeg;
     state.rollBaselineDeg = state.rawRollDeg;
+    state.gravityRollBaselineDeg = state.rawGravityRollDeg;
     state.headingBaselineDeg = state.rawHeadingDeg;
     state.pitchDeg = 0;
     state.rollDeg = 0;
@@ -253,7 +271,7 @@
       horizonX1,
       horizonX2,
       centerY,
-      -state.rollDeg,
+      CONFIG.visualRollSign * state.rollDeg,
       'rgba(255, 255, 255, 0.94)',
       CONFIG.horizonLineWidth
     );
@@ -345,11 +363,24 @@
     }
 
     const targetPitch = clamp(state.rawPitchDeg - state.pitchBaselineDeg, -85, 85);
-    const targetRoll = clamp(state.rawRollDeg - state.rollBaselineDeg, -85, 85);
+
+    // For visual roll, prefer the gravity vector. Gamma is still collected from
+    // DeviceOrientationEvent, but gamma can jump or invert near certain pitch values.
+    // Gravity roll is the screen tilt relative to the gravity vector and is much better
+    // for aligning an artificial horizon with the real horizon.
+    const rawRollSource = state.gravityRollSeen
+      ? normalize180(state.rawGravityRollDeg - state.gravityRollBaselineDeg)
+      : normalize180(state.rawRollDeg - state.rollBaselineDeg);
+    const targetRoll = clamp(
+      applyDeadband(rawRollSource * CONFIG.rollDisplayGain, CONFIG.rollDeadbandDeg),
+      -85,
+      85
+    );
+
     const targetHeading = normalize360(state.rawHeadingDeg - state.headingBaselineDeg);
 
     state.pitchDeg = smoothLinear(state.pitchDeg, targetPitch, CONFIG.attitudeSmoothingAlpha);
-    state.rollDeg = smoothLinear(state.rollDeg, targetRoll, CONFIG.attitudeSmoothingAlpha);
+    state.rollDeg = smoothLinear(state.rollDeg, targetRoll, CONFIG.gravityRollSmoothingAlpha);
     state.headingDeg = smoothHeading(state.headingDeg, targetHeading, CONFIG.attitudeSmoothingAlpha);
   }
 
@@ -372,14 +403,28 @@
 
     const noGravity = event.acceleration;
     const withGravity = event.accelerationIncludingGravity;
+
+    if (withGravity) {
+      const gx = Number.isFinite(withGravity.x) ? withGravity.x : 0;
+      const gy = Number.isFinite(withGravity.y) ? withGravity.y : 0;
+
+      // At neutral on your glasses, Y was about +9.7 m/s^2 and X was near zero.
+      // Roll is therefore the angle of the gravity vector in the X/Y plane.
+      // The sign may need one final flip depending on device mounting, but this avoids
+      // the gamma discontinuity you observed around neutral pitch and ~40 degrees.
+      state.rawGravityRollDeg = (Math.atan2(gx, gy) * 180) / Math.PI;
+      state.gravityRollSeen = true;
+    }
+
     const source = noGravity || withGravity || { x: 0, y: 0, z: 0 };
 
     let x = Number.isFinite(source.x) ? source.x : 0;
     let y = Number.isFinite(source.y) ? source.y : 0;
     let z = Number.isFinite(source.z) ? source.z : 0;
 
-    // On the glasses test, A-Y was around +9.7 at rest. If the browser only gives
-    // accelerationIncludingGravity, subtract gravity from Y so neutral is close to zero.
+    // If the browser only gives accelerationIncludingGravity, subtract gravity from Y
+    // so neutral is close to zero. If event.acceleration exists, it should already be
+    // gravity-compensated, so we leave it alone.
     if (!noGravity && withGravity) {
       y -= CONFIG.gravityMetersPerSecond2;
     }
