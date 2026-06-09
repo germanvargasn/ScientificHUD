@@ -6,7 +6,7 @@
   const CX = W / 2;
   const CY = H / 2;
 
-  const SETTINGS_KEY = 'scientificHud.v7.settings';
+  const SETTINGS_KEY = 'scientificHud.v8.settings';
 
   const cfg = {
     // Easy-to-adjust HUD geometry
@@ -23,7 +23,7 @@
 
     // Horizon / attitude tuning
     visualRollSign: 1,
-    visualPitchSign: 1,
+    visualPitchSign: -1,
     rollSmoothing: 0.12,
     pitchSmoothing: 0.12,
     rollDeadbandForNumber: 5,

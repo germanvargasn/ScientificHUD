@@ -1,4 +1,4 @@
-# Scientific HUD v7
+# Scientific HUD v8
 
 Version 7 focuses on the fighter-jet-style sky-dome pitch ladder.
 
@@ -48,3 +48,7 @@ visualPitchSign: 1
 
 If the pitch direction is reversed on the glasses, flip `visualPitchSign` from `1` to `-1`.
 If the roll direction is reversed, flip `visualRollSign` from `1` to `-1`.
+
+
+## v8 update
+- Reversed pitch sign so looking up reports positive pitch and looking down reports negative pitch.
