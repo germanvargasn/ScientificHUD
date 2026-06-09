@@ -1,35 +1,79 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <meta name="theme-color" content="#000000" />
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=600, height=600, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>Scientific HUD</title>
   <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
 </head>
 <body>
-  <main id="app" aria-label="Scientific HUD">
-    <canvas id="hudCanvas" width="600" height="600" aria-label="Scientific heads-up display"></canvas>
+  <main id="app" aria-label="Scientific HUD application">
+    <canvas id="hudCanvas" width="600" height="600"></canvas>
 
-    <section id="compassReadout" aria-label="Compass heading readout">
-      <div id="compassStrip"></div>
-    </section>
-
-    <section id="accelReadout" aria-label="Acceleration readout">
-      <div id="ax" class="axis axis-x">A-X: 0.0</div>
-      <div id="ay" class="axis axis-y">A-Y: 0.0</div>
-      <div id="az" class="axis axis-z">A-Z: 0.0</div>
-    </section>
-
-    <button id="calibrateButton" class="calibrate hidden" type="button">Pinch to reset horizontal position</button>
-
-    <section id="permissionOverlay" class="overlay" aria-label="Motion sensor permission dialog">
-      <div class="dialog">
+    <section id="copyrightScreen" class="screen active" data-screen="copyright">
+      <div class="panel large-panel">
+        <img src="icon.svg" alt="Scientific HUD icon" class="app-icon" />
         <h1>Scientific HUD</h1>
-        <p>Allow motion sensors</p>
-        <button id="enableSensorsButton" type="button">ENABLE</button>
+        <p class="notice">
+          Copyright © 2026 German Vargas. All rights reserved.
+        </p>
+        <p>
+          This project, concept, interface, and software implementation were created by German Vargas with support from AI-assisted development tools.
+        </p>
+        <p>
+          Unauthorized copying, redistribution, modification, publication, sale, or incorporation into other products is not permitted without written permission.
+        </p>
+        <button id="copyrightOk" class="menu-button selected">OK</button>
+      </div>
+    </section>
+
+    <section id="permissionScreen" class="screen" data-screen="permission">
+      <div class="panel">
+        <h1>Motion Access</h1>
+        <p>Scientific HUD uses device heading, tilt, roll, and acceleration data to draw the display.</p>
+        <button id="enableSensors" class="menu-button selected">Enable Sensors</button>
         <p class="hint">Pinch or press Enter</p>
       </div>
+    </section>
+
+    <section id="mainMenu" class="screen" data-screen="menu">
+      <div class="panel menu-panel">
+        <h1>Scientific HUD</h1>
+        <button class="menu-button selected" data-menu-index="0" id="startHud">Start HUD</button>
+        <button class="menu-button" data-menu-index="1" id="openSettings">Settings</button>
+        <button class="menu-button" data-menu-index="2" id="exitApp">Exit</button>
+      </div>
+    </section>
+
+    <section id="settingsScreen" class="screen" data-screen="settings">
+      <div class="panel settings-panel">
+        <h1>Settings</h1>
+        <div id="settingsList" class="settings-list" role="listbox" aria-label="HUD display settings"></div>
+        <button id="settingsBack" class="menu-button back-button">Return to HUD</button>
+      </div>
+    </section>
+
+    <section id="exitScreen" class="screen" data-screen="exit">
+      <div class="panel">
+        <h1>Scientific HUD</h1>
+        <p>HUD paused.</p>
+        <button id="exitReturn" class="menu-button selected">Main Menu</button>
+      </div>
+    </section>
+
+    <section id="hudOverlay" class="hud-overlay hidden" aria-label="HUD controls and readouts">
+      <div id="accelBox" class="accel-box">
+        <div id="ax" class="axis axis-x">A-X: 0.0</div>
+        <div id="ay" class="axis axis-y">A-Y: 0.0</div>
+        <div id="az" class="axis axis-z">A-Z: 0.0</div>
+      </div>
+      <div id="hudControls" class="hud-controls">
+        <button id="hudRecenter" class="hud-button selected">Recenter</button>
+        <button id="hudSettings" class="hud-button">Settings</button>
+        <button id="hudMainMenu" class="hud-button">Main Menu</button>
+      </div>
+      <div id="recenterHint" class="recenter-hint">Pinch to reset<br/>horizontal position</div>
     </section>
   </main>
   <script src="app.js"></script>

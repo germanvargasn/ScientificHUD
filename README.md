@@ -1,52 +1,59 @@
-# Scientific HUD v4
+# Scientific HUD v5
 
-A 600x600 web HUD prototype for Meta Ray-Ban Display-style web apps.
+A 600 x 600 web HUD prototype for Meta Ray-Ban Display-style web apps.
 
 ## Files
 
 - `index.html`
 - `styles.css`
 - `app.js`
+- `icon.svg`
+
+## v5 features
+
+- Copyright / attribution startup screen
+- Sensor permission screen
+- Main menu: Start HUD, Settings, Exit
+- Settings page with locally saved preferences using `localStorage`
+- HUD controls: Recenter, Settings, Main Menu
+- Optional subtle recenter hint
+- Compass strip with cardinal/intercardinal labels
+- Acceleration display, one decimal place
+- Pitch ladder with visible degree labels
+- Roll reference line with color-coded angle display
+- Recenter preserves heading; only tilt/roll neutral references are reset
 
 ## Sensor mapping
 
-Uses the standard `DeviceOrientationEvent` fields described by web orientation APIs and Meta's web-app docs pattern:
+The app uses the standard web orientation mapping described in Meta's web app guidance:
 
 - `event.alpha` = heading
 - `event.beta` = tilt / pitch
-- `event.gamma` = roll
+- `event.gamma` = roll fallback
 
-Uses `DeviceMotionEvent` for acceleration.
+For the artificial horizon, v5 preserves the v4 strategy: it prefers `DeviceMotionEvent.accelerationIncludingGravity` to derive visual roll from the gravity vector and falls back to `gamma` when gravity is unavailable.
 
-## Controls
+## Keyboard simulation
 
-On startup, press/pinch **ENABLE** to request motion sensor access.
+- Arrow left/right: roll
+- Arrow up/down: pitch
+- W/S: acceleration X
+- A/D: acceleration Y
+- Q/E: acceleration Z
+- H/J: heading
+- Enter: pinch / activate
+- Escape or Backspace: back
 
-After startup:
+## Notes
 
-- **SET ZERO** button / Enter / C = calibrate current pose as neutral.
-- Left/Right arrows = simulated roll.
-- Up/Down arrows = simulated pitch.
-- [ / ] = simulated heading.
-- W/S = simulated X acceleration.
-- A/D = simulated Y acceleration.
-- Q/E = simulated Z acceleration.
+If the artificial horizon appears mirrored on the glasses, open `app.js` and change:
 
-## v3 changes
+```js
+visualRollSign: 1
+```
 
-- Removed bottom-right LIVE/debug status text.
-- Added neutral calibration button.
-- Added top compass tape with N, NE, E, SE, S, SW, W, NW.
-- Uses alpha/beta/gamma explicitly.
-- Removed acceleration smoothing.
-- Displays acceleration with one decimal place.
-- Reverses A-X sign.
-- Subtracts gravity from A-Y when using accelerationIncludingGravity.
+to:
 
-
-## v4 changes
-
-- Calibration control is now a subtle bottom-right message: "Pinch to reset horizontal position".
-- The app still reads `event.alpha` as heading, `event.beta` as tilt/pitch, and `event.gamma` as roll.
-- The displayed artificial-horizon roll now prefers `DeviceMotionEvent.accelerationIncludingGravity` and computes roll from the gravity vector using `atan2(x, y)`. This is intended to avoid the instability seen with `gamma` near neutral pitch and around ~40 degrees.
-- If the horizon appears mirrored on the glasses, change `visualRollSign` in `app.js` from `1` to `-1`.
+```js
+visualRollSign: -1
+```
