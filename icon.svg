@@ -1,10 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="96" fill="#050505"/>
-  <circle cx="256" cy="256" r="192" fill="none" stroke="#00e5ff" stroke-width="16" opacity="0.9"/>
-  <path d="M64 260 C118 150 176 370 230 260 S342 150 448 260" fill="none" stroke="#00ff66" stroke-width="22" stroke-linecap="round"/>
-  <path d="M72 320 H440" stroke="#ffffff" stroke-width="10" stroke-linecap="round" opacity="0.95"/>
-  <path d="M256 78 V434" stroke="#ff3b30" stroke-width="10" stroke-linecap="round" opacity="0.95"/>
-  <text x="122" y="132" fill="#ff3b30" font-family="Arial, sans-serif" font-size="56" font-weight="700">X</text>
-  <text x="230" y="132" fill="#00ff66" font-family="Arial, sans-serif" font-size="56" font-weight="700">Y</text>
-  <text x="338" y="132" fill="#2f7cff" font-family="Arial, sans-serif" font-size="56" font-weight="700">Z</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Scientific HUD icon">
+  <rect width="512" height="512" rx="96" fill="#000"/>
+  <circle cx="256" cy="256" r="208" fill="none" stroke="#1fdfff" stroke-width="18" opacity="0.75"/>
+  <line x1="72" y1="256" x2="440" y2="256" stroke="#ffffff" stroke-width="12" opacity="0.85"/>
+  <line x1="256" y1="72" x2="256" y2="440" stroke="#ffffff" stroke-width="8" opacity="0.45"/>
+  <path d="M64 282 C112 150 160 150 208 282 S304 414 352 282 S400 150 448 282" fill="none" stroke="#00ff66" stroke-width="24" stroke-linecap="round"/>
+  <path d="M64 282 C112 150 160 150 208 282 S304 414 352 282 S400 150 448 282" fill="none" stroke="#ffcc00" stroke-width="10" stroke-linecap="round" opacity="0.95"/>
+  <text x="132" y="170" fill="#ff3030" font-family="Arial, Helvetica, sans-serif" font-size="54" font-weight="700">X</text>
+  <text x="238" y="106" fill="#00ff66" font-family="Arial, Helvetica, sans-serif" font-size="54" font-weight="700">Y</text>
+  <text x="342" y="170" fill="#3080ff" font-family="Arial, Helvetica, sans-serif" font-size="54" font-weight="700">Z</text>
 </svg>

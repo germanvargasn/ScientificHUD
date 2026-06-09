@@ -6,8 +6,7 @@
   const CX = W / 2;
   const CY = H / 2;
 
-  const SETTINGS_KEY = 'scientificHud.v5.settings';
-  const ACCEPT_KEY = 'scientificHud.v5.acceptedCopyright';
+  const SETTINGS_KEY = 'scientificHud.v6.settings';
 
   const cfg = {
     rollYellowDeg: 20,
@@ -15,7 +14,7 @@
     pitchYellowDeg: 20,
     pitchRedDeg: 40,
     pitchStepDeg: 10,
-    maxPitchLabelDeg: 40,
+    maxPitchLabelDeg: 90,
     pitchPixelsPerDeg: 7.5,
     horizonLengthPct: [0.10, 0.90],
     rollRefLengthPct: [0.20, 0.80],
@@ -36,11 +35,11 @@
     showRollDegrees: true,
     showPitch: true,
     showPitchDegrees: true,
-    showHudControls: false
+    showHudControls: true
   };
 
   let settings = loadSettings();
-  let screen = localStorage.getItem(ACCEPT_KEY) === 'true' ? 'permission' : 'copyright';
+  let screen = 'copyright';
   let priorScreen = 'menu';
   let sensorsEnabled = false;
   let simulationMode = true;
@@ -63,9 +62,12 @@
     zeroGravityRoll: 0,
     menuIndex: 0,
     settingsIndex: 0,
+    settingsPage: 0,
     hudControlIndex: 0,
     usingGravityRoll: false
   };
+
+  const SETTINGS_ROWS_PER_PAGE = 6;
 
   const settingItems = [
     ['showAccelerations', 'Show accelerations'],
@@ -164,17 +166,53 @@
     });
   }
 
+  function totalSettingsRows() {
+    return settingItems.length + 1; // + Return row
+  }
+
+  function totalSettingsPages() {
+    return Math.ceil(totalSettingsRows() / SETTINGS_ROWS_PER_PAGE);
+  }
+
+  function visibleSettingsRows() {
+    const rows = settingItems.map(([key, label], index) => ({ type: 'setting', key, label, index }));
+    rows.push({ type: 'back', label: priorScreen === 'hud' ? 'Return to HUD' : 'Return to Menu', index: settingItems.length });
+    const start = state.settingsPage * SETTINGS_ROWS_PER_PAGE;
+    return rows.slice(start, start + SETTINGS_ROWS_PER_PAGE);
+  }
+
+  function clampSettingsIndexToPage() {
+    const pageCount = totalSettingsPages();
+    state.settingsPage = clamp(state.settingsPage, 0, pageCount - 1);
+    const visible = visibleSettingsRows();
+    if (!visible.some(row => row.index === state.settingsIndex)) {
+      state.settingsIndex = visible[0]?.index ?? 0;
+    }
+  }
+
   function renderSettings() {
+    clampSettingsIndexToPage();
     settingsList.innerHTML = '';
-    settingItems.forEach(([key, label], i) => {
+    const visible = visibleSettingsRows();
+    visible.forEach((item) => {
       const row = document.createElement('button');
-      row.className = 'setting-row' + (i === state.settingsIndex ? ' selected' : '');
-      row.dataset.settingKey = key;
-      row.innerHTML = `<span class="setting-check">${settings[key] ? '✓' : ''}</span><span>${label}</span>`;
-      row.addEventListener('click', () => toggleSetting(i));
+      row.className = 'setting-row' + (item.index === state.settingsIndex ? ' selected' : '');
+      if (item.type === 'setting') {
+        row.dataset.settingKey = item.key;
+        row.innerHTML = `<span class="setting-check">${settings[item.key] ? '✓' : ''}</span><span>${item.label}</span>`;
+      } else {
+        row.classList.add('setting-back-row');
+        row.innerHTML = `<span class="setting-check">↩</span><span>${item.label}</span>`;
+      }
+      row.addEventListener('click', () => {
+        state.settingsIndex = item.index;
+        toggleSetting(item.index);
+      });
       settingsList.appendChild(row);
     });
-    document.getElementById('settingsBack').classList.toggle('selected', state.settingsIndex === settingItems.length);
+
+    const pageIndicator = document.getElementById('settingsPageIndicator');
+    if (pageIndicator) pageIndicator.textContent = `Page ${state.settingsPage + 1} of ${totalSettingsPages()}`;
   }
 
   function toggleSetting(index) {
@@ -366,7 +404,7 @@
     const color = colorForMagnitude(roll, cfg.rollYellowDeg, cfg.rollRedDeg);
 
     // True horizon: rotates opposite the measured roll so it remains aligned to the external horizon.
-    drawLine(CX, CY, horizonLen, -roll, 'rgba(255,255,255,0.96)', 6);
+    drawLine(CX, CY, horizonLen, roll, 'rgba(255,255,255,0.96)', 6);
 
     // Screen-aligned roll reference: fixed horizontal line, color-coded by roll magnitude.
     drawLine(CX, CY, refLen, 0, color, 3);
@@ -426,7 +464,22 @@
       state.menuIndex = clamp(state.menuIndex + delta, 0, 2);
       updateMenuSelection();
     } else if (screen === 'settings') {
-      state.settingsIndex = clamp(state.settingsIndex + delta, 0, settingItems.length);
+      const nextIndex = state.settingsIndex + delta;
+      if (nextIndex < 0) {
+        if (state.settingsPage > 0) {
+          state.settingsPage -= 1;
+          const visible = visibleSettingsRows();
+          state.settingsIndex = visible[visible.length - 1].index;
+        } else {
+          state.settingsIndex = 0;
+        }
+      } else if (nextIndex >= totalSettingsRows()) {
+        state.settingsIndex = totalSettingsRows() - 1;
+      } else {
+        state.settingsIndex = nextIndex;
+        const pageForIndex = Math.floor(state.settingsIndex / SETTINGS_ROWS_PER_PAGE);
+        state.settingsPage = clamp(pageForIndex, 0, totalSettingsPages() - 1);
+      }
       renderSettings();
     } else if (screen === 'hud' && settings.showHudControls) {
       state.hudControlIndex = clamp(state.hudControlIndex + delta, 0, 2);
@@ -436,14 +489,13 @@
 
   function activateCurrent() {
     if (screen === 'copyright') {
-      localStorage.setItem(ACCEPT_KEY, 'true');
       showScreen('permission');
     } else if (screen === 'permission') {
       requestSensors();
     } else if (screen === 'menu') {
       if (state.menuIndex === 0) showScreen('hud');
-      if (state.menuIndex === 1) { priorScreen = 'menu'; showScreen('settings'); }
-      if (state.menuIndex === 2) showScreen('exit');
+      if (state.menuIndex === 1) { priorScreen = 'menu'; state.settingsPage = 0; state.settingsIndex = 0; showScreen('settings'); }
+      if (state.menuIndex === 2) attemptExitApp();
     } else if (screen === 'settings') {
       toggleSetting(state.settingsIndex);
     } else if (screen === 'hud') {
@@ -453,12 +505,14 @@
         recenter();
       } else if (state.hudControlIndex === 1) {
         priorScreen = 'hud';
+        state.settingsPage = 0;
+        state.settingsIndex = 0;
         showScreen('settings');
       } else if (state.hudControlIndex === 2) {
         showScreen('menu');
       }
     } else if (screen === 'exit') {
-      showScreen('menu');
+      attemptExitApp();
     }
   }
 
@@ -493,6 +547,21 @@
     return true;
   }
 
+
+  function attemptExitApp() {
+    // In browser contexts, scripts can only close windows they opened. Meta web-app shells may honor
+    // window.close(); if not, fall back to navigating away rather than showing an in-app paused screen.
+    try { window.close(); } catch {}
+    setTimeout(() => {
+      try {
+        if (history.length > 1) history.back();
+        else window.location.replace('about:blank');
+      } catch {
+        window.location.href = 'about:blank';
+      }
+    }, 80);
+  }
+
   document.addEventListener('keydown', (e) => {
     if (['ArrowUp', 'ArrowDown'].includes(e.key) && screen !== 'hud') {
       e.preventDefault();
@@ -517,10 +586,10 @@
   document.getElementById('startHud').addEventListener('click', () => { state.menuIndex = 0; activateCurrent(); });
   document.getElementById('openSettings').addEventListener('click', () => { state.menuIndex = 1; activateCurrent(); });
   document.getElementById('exitApp').addEventListener('click', () => { state.menuIndex = 2; activateCurrent(); });
-  document.getElementById('settingsBack').addEventListener('click', () => showScreen(priorScreen === 'hud' ? 'hud' : 'menu'));
-  document.getElementById('exitReturn').addEventListener('click', () => showScreen('menu'));
+  document.getElementById('settingsBack')?.addEventListener('click', () => showScreen(priorScreen === 'hud' ? 'hud' : 'menu'));
+  document.getElementById('exitReturn')?.addEventListener('click', () => showScreen('menu'));
   document.getElementById('hudRecenter').addEventListener('click', recenter);
-  document.getElementById('hudSettings').addEventListener('click', () => { priorScreen = 'hud'; showScreen('settings'); });
+  document.getElementById('hudSettings').addEventListener('click', () => { priorScreen = 'hud'; state.settingsPage = 0; state.settingsIndex = 0; showScreen('settings'); });
   document.getElementById('hudMainMenu').addEventListener('click', () => showScreen('menu'));
 
   showScreen(screen);

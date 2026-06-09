@@ -6,6 +6,8 @@
   <title>Scientific HUD</title>
   <link rel="stylesheet" href="styles.css" />
   <link rel="icon" href="icon.svg" type="image/svg+xml" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
 </head>
 <body>
   <main id="app" aria-label="Scientific HUD application">
@@ -50,7 +52,7 @@
       <div class="panel settings-panel">
         <h1>Settings</h1>
         <div id="settingsList" class="settings-list" role="listbox" aria-label="HUD display settings"></div>
-        <button id="settingsBack" class="menu-button back-button">Return to HUD</button>
+        <div id="settingsPageIndicator" class="page-indicator">Page 1 of 1</div>
       </div>
     </section>
 

@@ -1,4 +1,4 @@
-# Scientific HUD v5
+# Scientific HUD v6
 
 A 600 x 600 web HUD prototype for Meta Ray-Ban Display-style web apps.
 
@@ -9,18 +9,18 @@ A 600 x 600 web HUD prototype for Meta Ray-Ban Display-style web apps.
 - `app.js`
 - `icon.svg`
 
-## v5 features
+## v6 features
 
 - Copyright / attribution startup screen
 - Sensor permission screen
 - Main menu: Start HUD, Settings, Exit
-- Settings page with locally saved preferences using `localStorage`
-- HUD controls: Recenter, Settings, Main Menu
+- Paged settings page with locally saved preferences using `localStorage`
+- HUD controls: Recenter, Settings, Main Menu, enabled by default
 - Optional subtle recenter hint
 - Compass strip with cardinal/intercardinal labels
 - Acceleration display, one decimal place
-- Pitch ladder with visible degree labels
-- Roll reference line with color-coded angle display
+- Pitch ladder with visible degree labels from -90° to +90° in 10° increments
+- Roll reference line with color-coded whole-degree angle display
 - Recenter preserves heading; only tilt/roll neutral references are reset
 
 ## Sensor mapping
@@ -57,3 +57,17 @@ to:
 ```js
 visualRollSign: -1
 ```
+
+
+## v6 changes from v5
+
+- Copyright screen appears on every app launch.
+- Pitch ladder extends to ±90°. Lines beyond ±40° remain red.
+- Horizon roll drawing sign restored toward the v4 behavior after real-device testing.
+- Settings are paged to stay within the 600 x 600 viewport.
+- Exit attempts to close the web app shell with `window.close()` and falls back to browser navigation.
+- Web App Manifest added with PNG app icons (`icon-192.png`, `icon-512.png`) plus SVG source icon.
+
+## Meta web app manifest
+
+The private Meta documentation page requires login, so this package uses standard Web App Manifest structure: `manifest.json` linked from `index.html`, with PNG icons and standalone display mode.

@@ -65,7 +65,7 @@ html, body {
 
 .large-panel { min-height: 540px; padding: 18px 22px; }
 .menu-panel { min-height: 420px; }
-.settings-panel { min-height: 552px; padding: 16px; }
+.settings-panel { min-height: 552px; padding: 16px; display: flex; flex-direction: column; }
 
 h1 {
   margin: 0 0 22px;
@@ -107,7 +107,7 @@ p {
   outline: 3px solid var(--white);
 }
 
-.settings-list { width: 100%; margin-top: 6px; }
+.settings-list { width: 100%; margin-top: 6px; flex: 1; }
 .setting-row {
   justify-content: flex-start;
   min-height: 52px;
@@ -127,6 +127,7 @@ p {
   font-size: 24px;
 }
 .back-button { min-height: 56px; font-size: 25px; margin-top: 10px; }
+.page-indicator { height: 34px; font-size: 22px; color: var(--muted); text-align: center; }
 
 .hud-overlay {
   position: absolute;
