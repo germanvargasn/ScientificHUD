@@ -1,73 +1,50 @@
-# Scientific HUD v6
+# Scientific HUD v7
 
-A 600 x 600 web HUD prototype for Meta Ray-Ban Display-style web apps.
+Version 7 focuses on the fighter-jet-style sky-dome pitch ladder.
 
-## Files
+## Main changes from v6
 
-- `index.html`
-- `styles.css`
-- `app.js`
-- `icon.svg`
+- Pitch ladder is now anchored to the sky dome instead of being screen-fixed.
+- Horizon is treated as the 0° pitch line.
+- Horizon and pitch lines rotate with roll.
+- Center crosshair remains screen-aligned and uses `CrosshairLength = 50`.
+- Horizon and pitch lines have a center gap equal to `CrosshairLength`.
+- Pitch lines are drawn every 10° from -90° to +90°.
+- Pitch line geometry uses:
+  - `pitchLineLength = 120`
+  - `sidePitchLineLength = (pitchLineLength - crosshairLength) / 2`
+- Color interpolation is green at 0°, yellow at 30°, red at 60°, and red through 90°.
+- Pitch is derived from the gravity vector when available to reduce roll/pitch coupling.
+- Horizon/roll and pitch use light exponential smoothing to reduce jitter.
+- HUD menu supports up/down selection while in HUD mode.
 
-## v6 features
+## Desktop simulation keys
 
-- Copyright / attribution startup screen
-- Sensor permission screen
-- Main menu: Start HUD, Settings, Exit
-- Paged settings page with locally saved preferences using `localStorage`
-- HUD controls: Recenter, Settings, Main Menu, enabled by default
-- Optional subtle recenter hint
-- Compass strip with cardinal/intercardinal labels
-- Acceleration display, one decimal place
-- Pitch ladder with visible degree labels from -90° to +90° in 10° increments
-- Roll reference line with color-coded whole-degree angle display
-- Recenter preserves heading; only tilt/roll neutral references are reset
+- Left / Right: roll
+- I / K: pitch
+- H / J: heading
+- Enter / Space: activate selected item
+- Escape / Backspace: go back
 
-## Sensor mapping
+On the glasses, thumb up/down should move menu selection and pinch should activate.
 
-The app uses the standard web orientation mapping described in Meta's web app guidance:
+## Tuning variables
 
-- `event.alpha` = heading
-- `event.beta` = tilt / pitch
-- `event.gamma` = roll fallback
-
-For the artificial horizon, v5 preserves the v4 strategy: it prefers `DeviceMotionEvent.accelerationIncludingGravity` to derive visual roll from the gravity vector and falls back to `gamma` when gravity is unavailable.
-
-## Keyboard simulation
-
-- Arrow left/right: roll
-- Arrow up/down: pitch
-- W/S: acceleration X
-- A/D: acceleration Y
-- Q/E: acceleration Z
-- H/J: heading
-- Enter: pinch / activate
-- Escape or Backspace: back
-
-## Notes
-
-If the artificial horizon appears mirrored on the glasses, open `app.js` and change:
+At the top of `app.js`:
 
 ```js
-visualRollSign: 1
+crosshairLength: 50,
+pitchLineLength: 120,
+pitchStepDeg: 10,
+maxPitchLabelDeg: 90,
+pitchPixelsPerDeg: 7.5,
+colorYellowDeg: 30,
+colorRedDeg: 60,
+rollSmoothing: 0.12,
+pitchSmoothing: 0.12,
+visualRollSign: 1,
+visualPitchSign: 1
 ```
 
-to:
-
-```js
-visualRollSign: -1
-```
-
-
-## v6 changes from v5
-
-- Copyright screen appears on every app launch.
-- Pitch ladder extends to ±90°. Lines beyond ±40° remain red.
-- Horizon roll drawing sign restored toward the v4 behavior after real-device testing.
-- Settings are paged to stay within the 600 x 600 viewport.
-- Exit attempts to close the web app shell with `window.close()` and falls back to browser navigation.
-- Web App Manifest added with PNG app icons (`icon-192.png`, `icon-512.png`) plus SVG source icon.
-
-## Meta web app manifest
-
-The private Meta documentation page requires login, so this package uses standard Web App Manifest structure: `manifest.json` linked from `index.html`, with PNG icons and standalone display mode.
+If the pitch direction is reversed on the glasses, flip `visualPitchSign` from `1` to `-1`.
+If the roll direction is reversed, flip `visualRollSign` from `1` to `-1`.

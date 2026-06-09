@@ -6,21 +6,28 @@
   const CX = W / 2;
   const CY = H / 2;
 
-  const SETTINGS_KEY = 'scientificHud.v6.settings';
+  const SETTINGS_KEY = 'scientificHud.v7.settings';
 
   const cfg = {
-    rollYellowDeg: 20,
-    rollRedDeg: 40,
-    pitchYellowDeg: 20,
-    pitchRedDeg: 40,
+    // Easy-to-adjust HUD geometry
+    crosshairLength: 50,        // px; screen-aligned center line
+    pitchLineLength: 120,       // px; total length including center gap
     pitchStepDeg: 10,
     maxPitchLabelDeg: 90,
     pitchPixelsPerDeg: 7.5,
     horizonLengthPct: [0.10, 0.90],
-    rollRefLengthPct: [0.20, 0.80],
-    pitchLineLengthPct: [0.40, 0.60],
+
+    // Smooth color transition: 0=green, 30=yellow, 60+=red
+    colorYellowDeg: 30,
+    colorRedDeg: 60,
+
+    // Horizon / attitude tuning
     visualRollSign: 1,
+    visualPitchSign: 1,
+    rollSmoothing: 0.12,
+    pitchSmoothing: 0.12,
     rollDeadbandForNumber: 5,
+
     headingLabelY: 38,
     compassRadiusPx: 210
   };
@@ -60,6 +67,10 @@
     zeroBeta: 0,
     zeroGamma: 0,
     zeroGravityRoll: 0,
+    zeroGravityPitch: 0,
+    smoothRoll: 0,
+    smoothPitch: 0,
+    smoothingInitialized: false,
     menuIndex: 0,
     settingsIndex: 0,
     settingsPage: 0,
@@ -124,7 +135,7 @@
   function normalize360(deg) { return ((deg % 360) + 360) % 360; }
   function lerp(a, b, t) { return a + (b - a) * t; }
 
-  function colorForMagnitude(deg, yellowDeg, redDeg) {
+  function colorForMagnitude(deg, yellowDeg = cfg.colorYellowDeg, redDeg = cfg.colorRedDeg) {
     const x = Math.abs(deg);
     let r, g, b = 0;
     if (x <= yellowDeg) {
@@ -292,8 +303,19 @@
     return state.gamma;
   }
 
+  function gravityPitchDeg() {
+    if (typeof state.gravityX === 'number' && typeof state.gravityY === 'number' && typeof state.gravityZ === 'number') {
+      // Roll-independent pitch estimate from the gravity vector. The horizontal magnitude
+      // sqrt(x^2+y^2) removes the cross-coupling that beta showed during head roll.
+      const horizontalG = Math.hypot(state.gravityX, state.gravityY);
+      return radToDeg(Math.atan2(state.gravityZ, horizontalG));
+    }
+    return state.beta;
+  }
+
   function currentPitch() {
-    return wrap180(state.beta - state.zeroBeta);
+    const raw = gravityPitchDeg();
+    return wrap180((raw - state.zeroGravityPitch) * cfg.visualPitchSign);
   }
 
   function currentVisualRoll() {
@@ -309,6 +331,10 @@
     state.zeroBeta = state.beta;
     state.zeroGamma = state.gamma;
     state.zeroGravityRoll = gravityRollDeg();
+    state.zeroGravityPitch = gravityPitchDeg();
+    state.smoothRoll = 0;
+    state.smoothPitch = 0;
+    state.smoothingInitialized = true;
     // Do not reset heading. North remains north.
   }
 
@@ -323,6 +349,30 @@
     ctx.beginPath();
     ctx.moveTo(cx - dx, cy - dy);
     ctx.lineTo(cx + dx, cy + dy);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+
+  function drawGappedLine(cx, cy, totalLen, gapLen, angleDeg, color, width) {
+    const sideLen = Math.max(0, (totalLen - gapLen) / 2);
+    if (sideLen <= 0) return;
+    const a = degToRad(angleDeg);
+    const ux = Math.cos(a);
+    const uy = Math.sin(a);
+    const leftOuter = -totalLen / 2;
+    const leftInner = -gapLen / 2;
+    const rightInner = gapLen / 2;
+    const rightOuter = totalLen / 2;
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(cx + ux * leftOuter, cy + uy * leftOuter);
+    ctx.lineTo(cx + ux * leftInner, cy + uy * leftInner);
+    ctx.moveTo(cx + ux * rightInner, cy + uy * rightInner);
+    ctx.lineTo(cx + ux * rightOuter, cy + uy * rightOuter);
     ctx.stroke();
     ctx.restore();
   }
@@ -362,7 +412,7 @@
     ctx.restore();
   }
 
-  function drawPitchLadder(pitch) {
+  function drawPitchLadder(pitch, roll) {
     if (!settings.showPitch) return;
     ctx.save();
     ctx.font = 'bold 20px system-ui, sans-serif';
@@ -371,43 +421,57 @@
     ctx.shadowColor = '#000';
     ctx.shadowBlur = 4;
 
-    const lineLen = W * (cfg.pitchLineLengthPct[1] - cfg.pitchLineLengthPct[0]);
-    const x1 = W * cfg.pitchLineLengthPct[0];
-    const x2 = W * cfg.pitchLineLengthPct[1];
+    const horizonLen = W * (cfg.horizonLengthPct[1] - cfg.horizonLengthPct[0]);
+    const pitchLineLen = cfg.pitchLineLength;
+    const gapLen = cfg.crosshairLength;
+    const normalAngle = roll - 90; // positive pitch appears above the horizon when roll is zero
+    const na = degToRad(normalAngle);
+    const nx = Math.cos(na);
+    const ny = Math.sin(na);
 
     for (let deg = -cfg.maxPitchLabelDeg; deg <= cfg.maxPitchLabelDeg; deg += cfg.pitchStepDeg) {
-      const y = CY - (deg - pitch) * cfg.pitchPixelsPerDeg;
-      if (y < 95 || y > H - 70) continue;
-      const color = colorForMagnitude(deg, cfg.pitchYellowDeg, cfg.pitchRedDeg);
+      const offset = (deg - pitch) * cfg.pitchPixelsPerDeg;
+      const x = CX + nx * offset;
+      const y = CY + ny * offset;
+      if (x < -120 || x > W + 120 || y < 80 || y > H - 60) continue;
+
+      const color = colorForMagnitude(deg);
       ctx.strokeStyle = color;
       ctx.fillStyle = color;
-      ctx.lineWidth = deg === 0 ? 3 : 2;
-      ctx.beginPath();
-      ctx.moveTo(x1, y);
-      ctx.lineTo(x2, y);
-      ctx.stroke();
+      const label = deg === 0 ? '0' : `${deg > 0 ? '+' : ''}${deg}`;
+
+      if (deg === 0) {
+        // Sky-dome horizon: long, thick, and gapped by CrosshairLength so the
+        // screen-fixed crosshair completes it at neutral roll/pitch.
+        drawGappedLine(x, y, horizonLen, gapLen, roll, 'rgba(255,255,255,0.96)', 6);
+      } else {
+        drawGappedLine(x, y, pitchLineLen, gapLen, roll, color, 2);
+      }
+
       if (settings.showPitchDegrees) {
-        const label = deg === 0 ? '0' : `${deg > 0 ? '+' : ''}${deg}`;
-        ctx.textAlign = 'right';
-        ctx.fillText(label, x1 - 12, y);
-        ctx.textAlign = 'left';
-        ctx.fillText(label, x2 + 12, y);
+        const a = degToRad(roll);
+        const ux = Math.cos(a);
+        const uy = Math.sin(a);
+        const labelGap = 14;
+        const halfLen = (deg === 0 ? horizonLen : pitchLineLen) / 2;
+        const lx = x - ux * (halfLen + labelGap);
+        const ly = y - uy * (halfLen + labelGap);
+        const rx = x + ux * (halfLen + labelGap);
+        const ry = y + uy * (halfLen + labelGap);
+        ctx.textAlign = 'center';
+        ctx.fillText(label, lx, ly);
+        ctx.fillText(label, rx, ry);
       }
     }
     ctx.restore();
   }
 
-  function drawRollAndHorizon(roll, pitch) {
+  function drawRollCrosshair(roll) {
     if (!settings.showRoll) return;
-    const horizonLen = W * (cfg.horizonLengthPct[1] - cfg.horizonLengthPct[0]);
-    const refLen = W * (cfg.rollRefLengthPct[1] - cfg.rollRefLengthPct[0]);
-    const color = colorForMagnitude(roll, cfg.rollYellowDeg, cfg.rollRedDeg);
+    const color = colorForMagnitude(roll);
 
-    // True horizon: rotates opposite the measured roll so it remains aligned to the external horizon.
-    drawLine(CX, CY, horizonLen, roll, 'rgba(255,255,255,0.96)', 6);
-
-    // Screen-aligned roll reference: fixed horizontal line, color-coded by roll magnitude.
-    drawLine(CX, CY, refLen, 0, color, 3);
+    // Screen-aligned crosshair: stays centered and horizontal on the display.
+    drawLine(CX, CY, cfg.crosshairLength, 0, color, 3);
 
     if (settings.showRollDegrees && Math.abs(roll) >= cfg.rollDeadbandForNumber) {
       drawRollDegreeLabels(roll, color);
@@ -416,18 +480,18 @@
 
   function drawRollDegreeLabels(roll, color) {
     const label = `${Math.round(Math.abs(roll))}°`;
-    const leftX = W * cfg.rollRefLengthPct[0] + 18;
-    const rightX = W * cfg.rollRefLengthPct[1] - 18;
+    const leftX = CX - cfg.crosshairLength / 2 - 28;
+    const rightX = CX + cfg.crosshairLength / 2 + 28;
     const y = CY;
-    const offset = 28;
+    const offset = 24;
 
-    // Put each number between the fixed screen line and the rotating horizon.
-    // With positive roll, left horizon/reference separation places label below on left and above on right.
-    const leftAbove = roll < 0;
-    const rightAbove = roll > 0;
+    // Flipped from v6: place the numbers between the sky-dome horizon and
+    // the screen-fixed crosshair for the real-device sign convention.
+    const leftAbove = roll > 0;
+    const rightAbove = roll < 0;
 
     ctx.save();
-    ctx.font = 'bold 26px system-ui, sans-serif';
+    ctx.font = 'bold 24px system-ui, sans-serif';
     ctx.fillStyle = color;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -444,13 +508,28 @@
     azEl.textContent = `A-Z: ${state.accelZ.toFixed(1)}`;
   }
 
+  function smoothAngle(previous, measured, alpha) {
+    const delta = wrap180(measured - previous);
+    return wrap180(previous + alpha * delta);
+  }
+
   function renderHud() {
     clearCanvas();
-    const pitch = currentPitch();
-    const roll = currentVisualRoll();
+    const measuredPitch = currentPitch();
+    const measuredRoll = currentVisualRoll();
+    if (!state.smoothingInitialized) {
+      state.smoothPitch = measuredPitch;
+      state.smoothRoll = measuredRoll;
+      state.smoothingInitialized = true;
+    } else {
+      state.smoothPitch = smoothAngle(state.smoothPitch, measuredPitch, cfg.pitchSmoothing);
+      state.smoothRoll = smoothAngle(state.smoothRoll, measuredRoll, cfg.rollSmoothing);
+    }
+    const pitch = state.smoothPitch;
+    const roll = state.smoothRoll;
     drawCompass(state.heading);
-    drawPitchLadder(pitch);
-    drawRollAndHorizon(roll, pitch);
+    drawPitchLadder(pitch, roll);
+    drawRollCrosshair(roll);
     updateAccelReadout();
   }
 
@@ -528,8 +607,8 @@
     switch (e.key.toLowerCase()) {
       case 'arrowleft': state.gamma -= stepAngle; break;
       case 'arrowright': state.gamma += stepAngle; break;
-      case 'arrowup': state.beta += stepAngle; break;
-      case 'arrowdown': state.beta -= stepAngle; break;
+      case 'i': state.beta += stepAngle; break;
+      case 'k': state.beta -= stepAngle; break;
       case 'w': state.accelX += stepAccel; break;
       case 's': state.accelX -= stepAccel; break;
       case 'a': state.accelY -= stepAccel; break;
@@ -563,7 +642,7 @@
   }
 
   document.addEventListener('keydown', (e) => {
-    if (['ArrowUp', 'ArrowDown'].includes(e.key) && screen !== 'hud') {
+    if (['ArrowUp', 'ArrowDown'].includes(e.key) && (screen !== 'hud' || settings.showHudControls)) {
       e.preventDefault();
       moveSelection(e.key === 'ArrowDown' ? 1 : -1);
       return;
