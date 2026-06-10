@@ -6,7 +6,7 @@
   const CX = W / 2;
   const CY = H / 2;
 
-  const SETTINGS_KEY = 'scientificHud.v8.settings';
+  const SETTINGS_KEY = 'scientificHud.v9.settings';
 
   const cfg = {
     // Easy-to-adjust HUD geometry
@@ -14,7 +14,8 @@
     pitchLineLength: 120,       // px; total length including center gap
     pitchStepDeg: 10,
     maxPitchLabelDeg: 90,
-    pitchPixelsPerDeg: 7.5,
+    pitchPixelsPerDeg: 7.5,        // base px/deg for sky-dome projection
+    pitchVisualScale: 1.35,       // stretches pitch ladder visually without changing measured pitch angle
     horizonLengthPct: [0.10, 0.90],
 
     // Smooth color transition: 0=green, 30=yellow, 60+=red
@@ -430,7 +431,9 @@
     const ny = Math.sin(na);
 
     for (let deg = -cfg.maxPitchLabelDeg; deg <= cfg.maxPitchLabelDeg; deg += cfg.pitchStepDeg) {
-      const offset = (deg - pitch) * cfg.pitchPixelsPerDeg;
+      // Visual-only scaling: measured pitch remains unchanged, but the sky-dome
+      // pitch ladder is stretched to better match the small Meta display field of view.
+      const offset = (deg - pitch) * cfg.pitchPixelsPerDeg * cfg.pitchVisualScale;
       const x = CX + nx * offset;
       const y = CY + ny * offset;
       if (x < -120 || x > W + 120 || y < 80 || y > H - 60) continue;
