@@ -46,3 +46,13 @@ visualPitchSign: -1
 - Escape / Backspace: go back
 
 On the glasses, thumb up/down should move menu selection and pinch should activate.
+
+
+## v10 changes
+- Heading logic was intentionally left unchanged because it tested correctly on the glasses.
+- Icon manifest was revised to use explicit relative paths and separate `any` and `maskable` PNG icon entries.
+- Added maskable icon files for app launchers that require them.
+- Sky-dome pitch projection now separates pitch line spacing from sky-dome motion:
+  - `pitchVisualScale = 1.35` controls spacing between pitch ladder lines.
+  - `pitchMotionScale = 1.75` controls how fast the sky dome moves with measured pitch.
+- The measured pitch calculation is unchanged; only visual placement of ladder lines is adjusted.
