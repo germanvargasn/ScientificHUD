@@ -6,7 +6,8 @@
   const CX = W / 2;
   const CY = H / 2;
 
-  const SETTINGS_KEY = 'scientificHud.v10.settings';
+  const SETTINGS_KEY = 'scientificHud.v12.settings';
+  const RECORDING_BACKUP_KEY = 'scientificHud.v12.lastRecording';
 
   const cfg = {
     // Easy-to-adjust HUD geometry
@@ -31,7 +32,16 @@
     rollDeadbandForNumber: 5,
 
     headingLabelY: 38,
-    compassRadiusPx: 210
+    compassRadiusPx: 210,
+
+    // Local recording
+    recordingIntervalMs: 100,
+
+    // CSV upload fallback. The app attempts local sharing first; if local
+    // sharing is not available or fails, it can send the CSV to this endpoint.
+    uploadEnabled: true,
+    uploadEndpoint: 'https://script.google.com/macros/s/AKfycbwKGzakLKeFzxxRHkTegUSkdt1mGwFhAzSaqOaxH-em2_tBTTlFDmDYYtxm9gWv9XjGqA/exec',
+    uploadSecret: 'CHANGE_THIS_TO_A_RANDOM_PASSWORD'
   };
 
   const defaultSettings = {
@@ -77,7 +87,19 @@
     settingsIndex: 0,
     settingsPage: 0,
     hudControlIndex: 0,
-    usingGravityRoll: false
+    usingGravityRoll: false,
+    exportIndex: 0,
+    recording: false,
+    silentMode: false,
+    sessionCode: '',
+    recordRows: [],
+    recordingStartedAt: null,
+    recordingStoppedAt: null,
+    recordingTimer: null,
+    samplesSinceBackup: 0,
+    lastCsvText: '',
+    lastCsvBlob: null,
+    lastCsvFileName: ''
   };
 
   const SETTINGS_ROWS_PER_PAGE = 6;
@@ -103,7 +125,8 @@
     permission: document.getElementById('permissionScreen'),
     menu: document.getElementById('mainMenu'),
     settings: document.getElementById('settingsScreen'),
-    exit: document.getElementById('exitScreen')
+    exit: document.getElementById('exitScreen'),
+    export: document.getElementById('exportScreen')
   };
 
   const hudOverlay = document.getElementById('hudOverlay');
@@ -111,6 +134,11 @@
   const axEl = document.getElementById('ax');
   const ayEl = document.getElementById('ay');
   const azEl = document.getElementById('az');
+  const recordingDot = document.getElementById('recordingDot');
+  const hudRecordBtn = document.getElementById('hudRecord');
+  const exportSessionEl = document.getElementById('exportSession');
+  const exportSummaryEl = document.getElementById('exportSummary');
+  const exportMessageEl = document.getElementById('exportMessage');
   const settingsList = document.getElementById('settingsList');
 
   function loadSettings() {
@@ -157,10 +185,13 @@
     Object.entries(screens).forEach(([name, el]) => el.classList.toggle('active', name === next));
     hudOverlay.classList.toggle('hidden', next !== 'hud');
     canvas.style.display = next === 'hud' ? 'block' : 'none';
+    document.body.classList.toggle('silent-mode', next === 'hud' && state.silentMode);
     if (next !== 'hud') clearCanvas();
     if (next === 'settings') renderSettings();
     if (next === 'hud') applyVisibilitySettings();
     if (next === 'menu') updateMenuSelection();
+    if (next === 'export') updateExportSelection();
+    updateRecordingUi();
   }
 
   function clearCanvas() { ctx.clearRect(0, 0, W, H); }
@@ -171,12 +202,36 @@
     ayEl.style.display = settings.showAccelY ? 'block' : 'none';
     azEl.style.display = settings.showAccelZ ? 'block' : 'none';
     document.body.classList.toggle('show-controls', !!settings.showHudControls);
+    document.body.classList.toggle('silent-mode', screen === 'hud' && state.silentMode);
+    updateRecordingUi();
   }
 
   function updateMenuSelection() {
     document.querySelectorAll('#mainMenu .menu-button').forEach((btn, i) => {
       btn.classList.toggle('selected', i === state.menuIndex);
     });
+  }
+
+  function hudButtons() {
+    return Array.from(document.querySelectorAll('.hud-button'));
+  }
+
+  function updateHudControlSelection() {
+    const buttons = hudButtons();
+    state.hudControlIndex = clamp(state.hudControlIndex, 0, buttons.length - 1);
+    buttons.forEach((b, i) => b.classList.toggle('selected', i === state.hudControlIndex));
+  }
+
+  function updateExportSelection() {
+    document.querySelectorAll('#exportScreen .menu-button').forEach((btn, i) => {
+      btn.classList.toggle('selected', i === state.exportIndex);
+    });
+  }
+
+  function updateRecordingUi() {
+    if (recordingDot) recordingDot.classList.toggle('hidden', !state.recording);
+    if (hudRecordBtn) hudRecordBtn.textContent = state.recording ? 'Stop Recording' : 'Start Recording';
+    updateHudControlSelection();
   }
 
   function totalSettingsRows() {
@@ -513,6 +568,253 @@
     azEl.textContent = `A-Z: ${state.accelZ.toFixed(1)}`;
   }
 
+
+  function generateSessionCode() {
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let code = 'SCI-';
+    const cryptoObj = window.crypto || window.msCrypto;
+    if (cryptoObj?.getRandomValues) {
+      const arr = new Uint8Array(4);
+      cryptoObj.getRandomValues(arr);
+      arr.forEach(v => { code += alphabet[v % alphabet.length]; });
+    } else {
+      for (let i = 0; i < 4; i++) code += alphabet[Math.floor(Math.random() * alphabet.length)];
+    }
+    return code;
+  }
+
+  function pad2(n) { return String(n).padStart(2, '0'); }
+
+  function timestampParts(date = new Date()) {
+    const yyyy = date.getFullYear();
+    const mm = pad2(date.getMonth() + 1);
+    const dd = pad2(date.getDate());
+    const hh = pad2(date.getHours());
+    const mi = pad2(date.getMinutes());
+    const ss = pad2(date.getSeconds());
+    const tenth = Math.floor(date.getMilliseconds() / 100);
+    return { date: `${yyyy}-${mm}-${dd}`, time: `${hh}:${mi}:${ss}.${tenth}` };
+  }
+
+  function safeFixed(value, digits = 3) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n.toFixed(digits) : '';
+  }
+
+  function adjustedTelemetrySnapshot() {
+    // Record the same adjusted/calibrated values being used in the HUD.
+    const pitch = state.smoothingInitialized ? state.smoothPitch : currentPitch();
+    const roll = state.smoothingInitialized ? state.smoothRoll : currentVisualRoll();
+    return {
+      ax: state.accelX,
+      ay: state.accelY,
+      az: state.accelZ,
+      pitch,
+      roll,
+      heading: normalize360(state.heading)
+    };
+  }
+
+  function recordSample() {
+    if (!state.recording) return;
+    const now = new Date();
+    const ts = timestampParts(now);
+    const t = adjustedTelemetrySnapshot();
+    state.recordRows.push({
+      date: ts.date,
+      time: ts.time,
+      ax: Number(t.ax),
+      ay: Number(t.ay),
+      az: Number(t.az),
+      pitch: Number(t.pitch),
+      roll: Number(t.roll),
+      heading: Number(t.heading)
+    });
+    state.samplesSinceBackup += 1;
+    if (state.samplesSinceBackup >= 10) {
+      backupRecording();
+      state.samplesSinceBackup = 0;
+    }
+  }
+
+  function backupRecording() {
+    if (!state.recording && !state.recordRows.length) return;
+    try {
+      localStorage.setItem(RECORDING_BACKUP_KEY, JSON.stringify({
+        sessionCode: state.sessionCode,
+        startedAt: state.recordingStartedAt?.toISOString?.() || null,
+        stoppedAt: state.recordingStoppedAt?.toISOString?.() || null,
+        rows: state.recordRows
+      }));
+    } catch (err) {
+      console.warn('Recording backup skipped:', err);
+    }
+  }
+
+  function startRecording() {
+    if (state.recording) return;
+    state.sessionCode = generateSessionCode();
+    state.recordRows = [];
+    state.recordingStartedAt = new Date();
+    state.recordingStoppedAt = null;
+    state.samplesSinceBackup = 0;
+    state.lastCsvText = '';
+    state.lastCsvBlob = null;
+    state.lastCsvFileName = '';
+    state.recording = true;
+    try { localStorage.removeItem(RECORDING_BACKUP_KEY); } catch {}
+    recordSample();
+    state.recordingTimer = window.setInterval(recordSample, cfg.recordingIntervalMs);
+    updateRecordingUi();
+  }
+
+  function stopRecording() {
+    if (!state.recording) return;
+    state.recording = false;
+    state.silentMode = false;
+    if (state.recordingTimer) {
+      window.clearInterval(state.recordingTimer);
+      state.recordingTimer = null;
+    }
+    state.recordingStoppedAt = new Date();
+    backupRecording();
+    prepareCsvExport();
+    updateRecordingUi();
+    showExportScreen();
+  }
+
+  function toggleRecording() {
+    if (state.recording) stopRecording();
+    else startRecording();
+  }
+
+  function enterSilentMode() {
+    if (!state.recording) startRecording();
+    state.silentMode = true;
+    clearCanvas();
+    applyVisibilitySettings();
+  }
+
+  function exitSilentMode() {
+    state.silentMode = false;
+    applyVisibilitySettings();
+  }
+
+  function csvEscape(value) {
+    const s = String(value ?? '');
+    return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  }
+
+  function buildCsvText() {
+    const header = ['date', 'time', 'ax', 'ay', 'az', 'pitch', 'roll', 'heading'];
+    const lines = [header.join(',')];
+    state.recordRows.forEach(row => {
+      lines.push([
+        row.date,
+        row.time,
+        safeFixed(row.ax, 3),
+        safeFixed(row.ay, 3),
+        safeFixed(row.az, 3),
+        safeFixed(row.pitch, 3),
+        safeFixed(row.roll, 3),
+        safeFixed(row.heading, 3)
+      ].map(csvEscape).join(','));
+    });
+    return lines.join('\n');
+  }
+
+  function prepareCsvExport() {
+    state.lastCsvText = buildCsvText();
+    state.lastCsvBlob = new Blob([state.lastCsvText], { type: 'text/csv;charset=utf-8' });
+    const start = state.recordingStartedAt || new Date();
+    const stamp = timestampParts(start);
+    const compactTime = stamp.time.replace(/[:.]/g, '');
+    state.lastCsvFileName = `scientific-hud_${state.sessionCode}_${stamp.date}_${compactTime}.csv`;
+  }
+
+  function showExportScreen() {
+    const start = state.recordingStartedAt;
+    const stop = state.recordingStoppedAt || new Date();
+    const durationSec = start ? Math.max(0, (stop - start) / 1000) : 0;
+    exportSessionEl.textContent = `Session: ${state.sessionCode || '--'}`;
+    exportSummaryEl.innerHTML = `Samples: ${state.recordRows.length}<br/>Duration: ${durationSec.toFixed(1)} sec`;
+    exportMessageEl.textContent = '';
+    state.exportIndex = 0;
+    showScreen('export');
+  }
+
+  async function shareCsv() {
+    if (!state.lastCsvBlob) prepareCsvExport();
+    const file = new File([state.lastCsvBlob], state.lastCsvFileName || 'scientific-hud.csv', { type: 'text/csv' });
+    try {
+      if (navigator.canShare && navigator.canShare({ files: [file] }) && navigator.share) {
+        await navigator.share({
+          title: `Scientific HUD ${state.sessionCode}`,
+          text: `Scientific HUD recording session ${state.sessionCode}`,
+          files: [file]
+        });
+        exportMessageEl.textContent = 'CSV shared locally.';
+      } else {
+        exportMessageEl.textContent = 'Local share unavailable. Uploading...';
+        await uploadCsv('Share unavailable');
+      }
+    } catch (err) {
+      if (err?.name === 'AbortError') {
+        exportMessageEl.textContent = 'Share cancelled. CSV not uploaded.';
+      } else {
+        exportMessageEl.textContent = 'Local share failed. Uploading...';
+        await uploadCsv(`Share failed: ${err?.message || err}`);
+      }
+    }
+  }
+
+  function downloadCsv() {
+    if (!state.lastCsvBlob) prepareCsvExport();
+    const url = URL.createObjectURL(state.lastCsvBlob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = state.lastCsvFileName || 'scientific-hud.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    exportMessageEl.textContent = 'CSV download requested. If no file appears, choose Upload CSV.';
+  }
+
+  async function uploadCsv(reason = 'Manual upload') {
+    if (!cfg.uploadEnabled || !cfg.uploadEndpoint) {
+      exportMessageEl.textContent = 'Upload endpoint is not configured.';
+      return;
+    }
+    if (!state.lastCsvText) prepareCsvExport();
+
+    const payload = {
+      secret: cfg.uploadSecret,
+      sessionCode: state.sessionCode || generateSessionCode(),
+      fileName: state.lastCsvFileName || 'scientific-hud.csv',
+      reason,
+      csv: state.lastCsvText
+    };
+
+    try {
+      // no-cors keeps this compatible with simple Apps Script web apps from a
+      // static GitHub Pages origin. The tradeoff is that the response is opaque,
+      // so success cannot be confirmed from the HUD runtime.
+      await fetch(cfg.uploadEndpoint, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: {
+          'Content-Type': 'text/plain;charset=utf-8'
+        },
+        body: JSON.stringify(payload)
+      });
+      exportMessageEl.textContent = `Upload sent. Session: ${payload.sessionCode}`;
+    } catch (err) {
+      exportMessageEl.textContent = 'Upload failed. Try again later.';
+      console.warn('CSV upload failed:', err);
+    }
+  }
+
   function smoothAngle(previous, measured, alpha) {
     const delta = wrap180(measured - previous);
     return wrap180(previous + alpha * delta);
@@ -520,6 +822,10 @@
 
   function renderHud() {
     clearCanvas();
+    if (state.silentMode) {
+      updateRecordingUi();
+      return;
+    }
     const measuredPitch = currentPitch();
     const measuredRoll = currentVisualRoll();
     if (!state.smoothingInitialized) {
@@ -565,9 +871,13 @@
         state.settingsPage = clamp(pageForIndex, 0, totalSettingsPages() - 1);
       }
       renderSettings();
-    } else if (screen === 'hud' && settings.showHudControls) {
-      state.hudControlIndex = clamp(state.hudControlIndex + delta, 0, 2);
-      document.querySelectorAll('.hud-button').forEach((b, i) => b.classList.toggle('selected', i === state.hudControlIndex));
+    } else if (screen === 'hud' && settings.showHudControls && !state.silentMode) {
+      const count = hudButtons().length;
+      state.hudControlIndex = clamp(state.hudControlIndex + delta, 0, count - 1);
+      updateHudControlSelection();
+    } else if (screen === 'export') {
+      state.exportIndex = clamp(state.exportIndex + delta, 0, 3);
+      updateExportSelection();
     }
   }
 
@@ -583,7 +893,9 @@
     } else if (screen === 'settings') {
       toggleSetting(state.settingsIndex);
     } else if (screen === 'hud') {
-      if (!settings.showHudControls) {
+      if (state.silentMode) {
+        exitSilentMode();
+      } else if (!settings.showHudControls) {
         recenter();
       } else if (state.hudControlIndex === 0) {
         recenter();
@@ -594,7 +906,16 @@
         showScreen('settings');
       } else if (state.hudControlIndex === 2) {
         showScreen('menu');
+      } else if (state.hudControlIndex === 3) {
+        toggleRecording();
+      } else if (state.hudControlIndex === 4) {
+        enterSilentMode();
       }
+    } else if (screen === 'export') {
+      if (state.exportIndex === 0) shareCsv();
+      else if (state.exportIndex === 1) downloadCsv();
+      else if (state.exportIndex === 2) uploadCsv('Manual upload');
+      else if (state.exportIndex === 3) showScreen('hud');
     } else if (screen === 'exit') {
       attemptExitApp();
     }
@@ -602,7 +923,11 @@
 
   function goBack() {
     if (screen === 'settings') showScreen(priorScreen === 'hud' ? 'hud' : 'menu');
-    else if (screen === 'hud') showScreen('menu');
+    else if (screen === 'hud') {
+      if (state.silentMode) return;
+      showScreen('menu');
+    }
+    else if (screen === 'export') showScreen('hud');
     else if (screen === 'exit') showScreen('menu');
   }
 
@@ -675,6 +1000,12 @@
   document.getElementById('hudRecenter').addEventListener('click', recenter);
   document.getElementById('hudSettings').addEventListener('click', () => { priorScreen = 'hud'; state.settingsPage = 0; state.settingsIndex = 0; showScreen('settings'); });
   document.getElementById('hudMainMenu').addEventListener('click', () => showScreen('menu'));
+  document.getElementById('hudRecord').addEventListener('click', toggleRecording);
+  document.getElementById('hudSilent').addEventListener('click', enterSilentMode);
+  document.getElementById('shareCsv').addEventListener('click', () => { state.exportIndex = 0; shareCsv(); updateExportSelection(); });
+  document.getElementById('downloadCsv').addEventListener('click', () => { state.exportIndex = 1; downloadCsv(); updateExportSelection(); });
+  document.getElementById('uploadCsv').addEventListener('click', () => { state.exportIndex = 2; uploadCsv('Manual upload'); updateExportSelection(); });
+  document.getElementById('returnHud').addEventListener('click', () => { state.exportIndex = 3; showScreen('hud'); });
 
   showScreen(screen);
   applyVisibilitySettings();

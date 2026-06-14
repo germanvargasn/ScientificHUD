@@ -66,7 +66,21 @@
       </div>
     </section>
 
+    <section id="exportScreen" class="screen" data-screen="export">
+      <div class="panel export-panel">
+        <h1>Recording Complete</h1>
+        <p id="exportSession" class="notice">Session: --</p>
+        <p id="exportSummary">Samples: 0<br/>Duration: 0.0 sec</p>
+        <button id="shareCsv" class="menu-button selected">Share CSV</button>
+        <button id="downloadCsv" class="menu-button">Download CSV</button>
+        <button id="uploadCsv" class="menu-button">Upload CSV</button>
+        <button id="returnHud" class="menu-button">Return to HUD</button>
+        <p id="exportMessage" class="hint"></p>
+      </div>
+    </section>
+
     <section id="hudOverlay" class="hud-overlay hidden" aria-label="HUD controls and readouts">
+      <div id="recordingDot" class="recording-dot hidden" aria-label="Recording active"></div>
       <div id="accelBox" class="accel-box">
         <div id="ax" class="axis axis-x">A-X: 0.0</div>
         <div id="ay" class="axis axis-y">A-Y: 0.0</div>
@@ -76,6 +90,8 @@
         <button id="hudRecenter" class="hud-button selected">Recenter</button>
         <button id="hudSettings" class="hud-button">Settings</button>
         <button id="hudMainMenu" class="hud-button">Main Menu</button>
+        <button id="hudRecord" class="hud-button">Start Recording</button>
+        <button id="hudSilent" class="hud-button">Silent Mode</button>
       </div>
       <div id="recenterHint" class="recenter-hint">Pinch to reset<br/>horizontal position</div>
     </section>
